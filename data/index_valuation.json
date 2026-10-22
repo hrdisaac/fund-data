@@ -1,8 +1,8 @@
 {
  "source": "蛋卷基金 index_eva (data from Wind) — personal use",
  "source_url": "https://danjuanfunds.com/djapi/index_eva/dj",
- "fetched_at_utc": "2026-10-22T14:23:04+00:00",
- "fetched_at_beijing": "2026-10-22 22:23:04",
+ "fetched_at_utc": "2026-10-22T18:44:46+00:00",
+ "fetched_at_beijing": "2026-10-23 02:44:46",
  "percent_fields_are": "percent (0–100)",
  "schema": 2,
  "count": 63,
@@ -67,7 +67,7 @@
    "type": "1",
    "history_from": "2017-10-23",
    "pb_flag": false,
-   "peg": 0.7745,
+   "peg": 0.7744,
    "bond_yield_raw": 0.05,
    "url": null
   },
@@ -86,7 +86,7 @@
    "type": "3",
    "history_from": "2016-07-06",
    "pb_flag": false,
-   "peg": 0.5361,
+   "peg": 0.5364,
    "bond_yield_raw": 0.05,
    "url": null
   },
@@ -105,7 +105,7 @@
    "type": "2",
    "history_from": "2016-06-28",
    "pb_flag": false,
-   "peg": 3.0605,
+   "peg": 3.0633,
    "bond_yield_raw": 0.05,
    "url": "https://danjuanfunds.com/funding/007605?channel=1800100001&source=guzhi__web_20171001"
   },
@@ -124,7 +124,7 @@
    "type": "2",
    "history_from": "2016-07-07",
    "pb_flag": false,
-   "peg": 1.0052,
+   "peg": 1.0054,
    "bond_yield_raw": 0.05,
    "url": "https://danjuanfunds.com/funding/003318?channel=1800100001&source=guzhi__web_20171001"
   },
@@ -162,7 +162,7 @@
    "type": "3",
    "history_from": "2019-03-20",
    "pb_flag": false,
-   "peg": 0.4205,
+   "peg": 0.4206,
    "bond_yield_raw": 0.05,
    "url": "https://danjuanfunds.com/funding/007873?channel=1800100001&source=guzhi__web_20171001"
   },
@@ -181,7 +181,7 @@
    "type": "2",
    "history_from": "2016-07-07",
    "pb_flag": false,
-   "peg": 0.4943,
+   "peg": 0.4947,
    "bond_yield_raw": 0.05,
    "url": "https://danjuanfunds.com/funding/007658?channel=1800100001&source=guzhi__web_20171001"
   },
@@ -200,7 +200,7 @@
    "type": "2",
    "history_from": "2019-04-25",
    "pb_flag": false,
-   "peg": 1.1926,
+   "peg": 1.1891,
    "bond_yield_raw": 0.05,
    "url": "https://danjuanfunds.com/funding/007751?channel=1800100001&source=guzhi__web_20171001"
   },
@@ -238,7 +238,7 @@
    "type": "2",
    "history_from": "2016-07-06",
    "pb_flag": false,
-   "peg": 3.189,
+   "peg": 3.1897,
    "bond_yield_raw": 0.05,
    "url": null
   },
@@ -257,7 +257,7 @@
    "type": "2",
    "history_from": "2016-07-07",
    "pb_flag": false,
-   "peg": 1.8322,
+   "peg": 1.8331,
    "bond_yield_raw": 0.05,
    "url": "https://danjuanfunds.com/funding/005279?channel=1800100001&source=guzhi__web_20171001"
   },
@@ -295,7 +295,7 @@
    "type": "2",
    "history_from": "2016-07-06",
    "pb_flag": false,
-   "peg": 2.1383,
+   "peg": 2.1373,
    "bond_yield_raw": 0.05,
    "url": "https://danjuanfunds.com/funding/501029?channel=1800100001&source=guzhi__web_20171001"
   },
@@ -447,7 +447,7 @@
    "type": "1",
    "history_from": "2016-07-07",
    "pb_flag": false,
-   "peg": 1.0915,
+   "peg": 1.0912,
    "bond_yield_raw": 0.05,
    "url": "https://danjuanfunds.com/funding/040180?channel=1800100001&source=guzhi__web_20171001"
   },
@@ -466,7 +466,7 @@
    "type": "2",
    "history_from": "2016-07-05",
    "pb_flag": false,
-   "peg": 1.4905,
+   "peg": 1.4902,
    "bond_yield_raw": 0.05,
    "url": null
   },
@@ -485,7 +485,7 @@
    "type": "1",
    "history_from": "2016-07-07",
    "pb_flag": false,
-   "peg": 1.301,
+   "peg": 1.3002,
    "bond_yield_raw": 0.05,
    "url": "https://danjuanfunds.com/funding/110003?channel=1800100001&source=guzhi__web_20171001"
   },
@@ -504,7 +504,7 @@
    "type": "1",
    "history_from": "2016-07-07",
    "pb_flag": false,
-   "peg": 1.3887,
+   "peg": 1.3888,
    "bond_yield_raw": 0.05,
    "url": "https://danjuanfunds.com/funding/501050?channel=1800100001&source=guzhi__web_20171001"
   },
@@ -542,7 +542,7 @@
    "type": "1",
    "history_from": "2019-12-31",
    "pb_flag": false,
-   "peg": 0.617,
+   "peg": 0.6174,
    "bond_yield_raw": 0.05,
    "url": null
   },
@@ -561,7 +561,7 @@
    "type": "3",
    "history_from": "2016-07-07",
    "pb_flag": false,
-   "peg": 0.458,
+   "peg": 0.4582,
    "bond_yield_raw": 0.05,
    "url": "https://danjuanfunds.com/funding/001064?channel=1800100001&source=guzhi__web_20171001"
   },
@@ -580,7 +580,7 @@
    "type": "1",
    "history_from": "2016-07-07",
    "pb_flag": false,
-   "peg": 0.7008,
+   "peg": 0.7002,
    "bond_yield_raw": 0.05,
    "url": "https://danjuanfunds.com/funding/003646?channel=1800100001&source=guzhi__web_20171001"
   },
@@ -599,7 +599,7 @@
    "type": "1",
    "history_from": "2016-07-07",
    "pb_flag": false,
-   "peg": 0.8068,
+   "peg": 0.8072,
    "bond_yield_raw": 0.05,
    "url": "https://danjuanfunds.com/funding/240014?channel=1800100001&source=guzhi__web_20171001"
   },
@@ -618,7 +618,7 @@
    "type": "1",
    "history_from": "2016-07-07",
    "pb_flag": false,
-   "peg": 0.5933,
+   "peg": 0.5938,
    "bond_yield_raw": 0.05,
    "url": "https://danjuanfunds.com/funding/000478?channel=1800100001&source=guzhi__web_20171001"
   },
@@ -637,7 +637,7 @@
    "type": "2",
    "history_from": "2016-07-07",
    "pb_flag": false,
-   "peg": 1.4101,
+   "peg": 1.4096,
    "bond_yield_raw": 0.05,
    "url": "https://danjuanfunds.com/funding/310398?channel=1800100001&source=guzhi__web_20171001"
   },
@@ -656,7 +656,7 @@
    "type": "2",
    "history_from": "2016-07-07",
    "pb_flag": false,
-   "peg": 1.4162,
+   "peg": 1.4159,
    "bond_yield_raw": 0.05,
    "url": "https://danjuanfunds.com/funding/090010?channel=1800100001&source=guzhi__web_20171001"
   },
@@ -675,7 +675,7 @@
    "type": "2",
    "history_from": "2016-07-07",
    "pb_flag": false,
-   "peg": 1.2549,
+   "peg": 1.2556,
    "bond_yield_raw": 0.05,
    "url": "https://danjuanfunds.com/funding/160716?channel=1800100001&source=guzhi__web_20171001"
   },
@@ -694,7 +694,7 @@
    "type": "3",
    "history_from": "2016-07-07",
    "pb_flag": false,
-   "peg": 2.1098,
+   "peg": 2.1025,
    "bond_yield_raw": 0.05,
    "url": "https://danjuanfunds.com/funding/000248?channel=1800100001&source=guzhi__web_20171001"
   },
@@ -713,7 +713,7 @@
    "type": "3",
    "history_from": "2016-07-07",
    "pb_flag": false,
-   "peg": 1.0093,
+   "peg": 1.0095,
    "bond_yield_raw": 0.05,
    "url": "https://danjuanfunds.com/funding/001550?channel=1800100001&source=guzhi__web_20171001"
   },
@@ -751,7 +751,7 @@
    "type": "3",
    "history_from": "2016-07-07",
    "pb_flag": false,
-   "peg": 0.998,
+   "peg": 0.9981,
    "bond_yield_raw": 0.05,
    "url": "https://danjuanfunds.com/funding/001180?channel=1800100001&source=guzhi__web_20171001"
   },
@@ -770,7 +770,7 @@
    "type": "3",
    "history_from": "2016-07-07",
    "pb_flag": false,
-   "peg": 0.5606,
+   "peg": 0.5609,
    "bond_yield_raw": 0.05,
    "url": "https://danjuanfunds.com/funding/002974?channel=1800100001&source=guzhi__web_20171001"
   },
@@ -865,7 +865,7 @@
    "type": "1",
    "history_from": "2016-07-07",
    "pb_flag": false,
-   "peg": 0.4177,
+   "peg": 0.4182,
    "bond_yield_raw": 0.05,
    "url": "https://danjuanfunds.com/funding/163109?channel=1800100001&source=guzhi__web_20171001"
   },
@@ -884,7 +884,7 @@
    "type": "1",
    "history_from": "2016-07-07",
    "pb_flag": false,
-   "peg": 0.41,
+   "peg": 0.4107,
    "bond_yield_raw": 0.05,
    "url": "https://danjuanfunds.com/funding/110026?channel=1800100001&source=guzhi__web_20171001"
   },
@@ -922,7 +922,7 @@
    "type": "2",
    "history_from": "2016-07-07",
    "pb_flag": false,
-   "peg": 0.5931,
+   "peg": 0.5935,
    "bond_yield_raw": 0.05,
    "url": "https://danjuanfunds.com/funding/481012?channel=1800100001&source=guzhi__web_20171001"
   },
@@ -941,7 +941,7 @@
    "type": "1",
    "history_from": "2016-07-07",
    "pb_flag": false,
-   "peg": 0.4326,
+   "peg": 0.4331,
    "bond_yield_raw": 0.05,
    "url": "https://danjuanfunds.com/funding/217016?channel=1800100001&source=guzhi__web_20171001"
   },
@@ -979,7 +979,7 @@
    "type": "3",
    "history_from": "2016-07-07",
    "pb_flag": false,
-   "peg": 2.6248,
+   "peg": 2.625,
    "bond_yield_raw": 0.05,
    "url": "https://danjuanfunds.com/funding/160222?channel=1800100001&source=guzhi__web_20171001"
   },
@@ -998,7 +998,7 @@
    "type": "3",
    "history_from": "2016-07-07",
    "pb_flag": true,
-   "peg": 0.3952,
+   "peg": 0.3956,
    "bond_yield_raw": 0.05,
    "url": "https://danjuanfunds.com/funding/160225?channel=1800100001&source=guzhi__web_20171001"
   },
@@ -1017,7 +1017,7 @@
    "type": "2",
    "history_from": "2016-07-06",
    "pb_flag": false,
-   "peg": 1.2372,
+   "peg": 1.2378,
    "bond_yield_raw": 0.05,
    "url": "https://danjuanfunds.com/funding/165312?channel=1800100001&source=guzhi__web_20171001"
   },
@@ -1055,7 +1055,7 @@
    "type": "2",
    "history_from": "2016-07-07",
    "pb_flag": false,
-   "peg": 0.4258,
+   "peg": 0.4265,
    "bond_yield_raw": 0.05,
    "url": "https://danjuanfunds.com/funding/530015?channel=1800100001&source=guzhi__web_20171001"
   },
@@ -1074,7 +1074,7 @@
    "type": "2",
    "history_from": "2016-07-07",
    "pb_flag": false,
-   "peg": 0.3782,
+   "peg": 0.3785,
    "bond_yield_raw": 0.05,
    "url": "https://danjuanfunds.com/funding/070023?channel=1800100001&source=guzhi__web_20171001"
   },
@@ -1112,7 +1112,7 @@
    "type": "3",
    "history_from": "2016-07-07",
    "pb_flag": true,
-   "peg": 0.8995,
+   "peg": 0.8996,
    "bond_yield_raw": 0.05,
    "url": "https://danjuanfunds.com/funding/163115?channel=1800100001&source=guzhi__web_20171001"
   },
@@ -1150,7 +1150,7 @@
    "type": "3",
    "history_from": "2016-07-07",
    "pb_flag": true,
-   "peg": 0.616,
+   "peg": 0.6139,
    "bond_yield_raw": 0.05,
    "url": "https://danjuanfunds.com/funding/006098?channel=1800100001&source=guzhi__web_20171001"
   },
@@ -1169,7 +1169,7 @@
    "type": "3",
    "history_from": "2016-07-07",
    "pb_flag": true,
-   "peg": 2.091,
+   "peg": 2.0931,
    "bond_yield_raw": 0.05,
    "url": "https://danjuanfunds.com/funding/240019?channel=1800100001&source=guzhi__web_20171001"
   },
@@ -1188,7 +1188,7 @@
    "type": "3",
    "history_from": "2016-07-07",
    "pb_flag": false,
-   "peg": 1.0843,
+   "peg": 1.0847,
    "bond_yield_raw": 0.05,
    "url": null
   },
