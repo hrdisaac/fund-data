@@ -1,9 +1,10 @@
 {
  "source": "蛋卷基金 index_eva (data from Wind) — personal use",
  "source_url": "https://danjuanfunds.com/djapi/index_eva/dj",
- "fetched_at_utc": "2026-10-22T13:43:57+00:00",
- "fetched_at_beijing": "2026-10-22 21:43:57",
+ "fetched_at_utc": "2026-10-22T14:23:04+00:00",
+ "fetched_at_beijing": "2026-10-22 22:23:04",
  "percent_fields_are": "percent (0–100)",
+ "schema": 2,
  "count": 63,
  "fields_seen": [
   "begin_at",
@@ -42,7 +43,14 @@
    "roe": 13.48,
    "dividend_yield": 0.99,
    "eva_type": "high",
-   "date": "10-22"
+   "date": "2026-10-22",
+   "date_text": "10-22",
+   "type": "1",
+   "history_from": "2017-02-17",
+   "pb_flag": false,
+   "peg": null,
+   "bond_yield_raw": 0.05,
+   "url": "https://danjuanfunds.com/funding/164824?channel=1800100001&source=guzhi__web_20171001"
   },
   {
    "code": "CSI716567",
@@ -54,7 +62,14 @@
    "roe": 11.04,
    "dividend_yield": 2.78,
    "eva_type": "high",
-   "date": "10-22"
+   "date": "2026-10-22",
+   "date_text": "10-22",
+   "type": "1",
+   "history_from": "2017-10-23",
+   "pb_flag": false,
+   "peg": 0.7745,
+   "bond_yield_raw": 0.05,
+   "url": null
   },
   {
    "code": "CSI930652",
@@ -66,7 +81,14 @@
    "roe": 12.28,
    "dividend_yield": 0.76,
    "eva_type": "high",
-   "date": "10-22"
+   "date": "2026-10-22",
+   "date_text": "10-22",
+   "type": "3",
+   "history_from": "2016-07-06",
+   "pb_flag": false,
+   "peg": 0.5361,
+   "bond_yield_raw": 0.05,
+   "url": null
   },
   {
    "code": "CSI930740",
@@ -78,7 +100,14 @@
    "roe": 9.56,
    "dividend_yield": 4.46,
    "eva_type": "high",
-   "date": "10-22"
+   "date": "2026-10-22",
+   "date_text": "10-22",
+   "type": "2",
+   "history_from": "2016-06-28",
+   "pb_flag": false,
+   "peg": 3.0605,
+   "bond_yield_raw": 0.05,
+   "url": "https://danjuanfunds.com/funding/007605?channel=1800100001&source=guzhi__web_20171001"
   },
   {
    "code": "CSI930782",
@@ -90,7 +119,14 @@
    "roe": 8.14,
    "dividend_yield": 2.62,
    "eva_type": "high",
-   "date": "10-22"
+   "date": "2026-10-22",
+   "date_text": "10-22",
+   "type": "2",
+   "history_from": "2016-07-07",
+   "pb_flag": false,
+   "peg": 1.0052,
+   "bond_yield_raw": 0.05,
+   "url": "https://danjuanfunds.com/funding/003318?channel=1800100001&source=guzhi__web_20171001"
   },
   {
    "code": "CSI931079",
@@ -102,7 +138,14 @@
    "roe": 14.9,
    "dividend_yield": 0.83,
    "eva_type": "high",
-   "date": "10-22"
+   "date": "2026-10-22",
+   "date_text": "10-22",
+   "type": "3",
+   "history_from": "2019-04-30",
+   "pb_flag": false,
+   "peg": 0.3321,
+   "bond_yield_raw": 0.05,
+   "url": null
   },
   {
    "code": "CSI931087",
@@ -114,7 +157,14 @@
    "roe": 15.74,
    "dividend_yield": 0.72,
    "eva_type": "high",
-   "date": "10-22"
+   "date": "2026-10-22",
+   "date_text": "10-22",
+   "type": "3",
+   "history_from": "2019-03-20",
+   "pb_flag": false,
+   "peg": 0.4205,
+   "bond_yield_raw": 0.05,
+   "url": "https://danjuanfunds.com/funding/007873?channel=1800100001&source=guzhi__web_20171001"
   },
   {
    "code": "CSI931142",
@@ -126,7 +176,14 @@
    "roe": 15.77,
    "dividend_yield": 2.84,
    "eva_type": "high",
-   "date": "10-22"
+   "date": "2026-10-22",
+   "date_text": "10-22",
+   "type": "2",
+   "history_from": "2016-07-07",
+   "pb_flag": false,
+   "peg": 0.4943,
+   "bond_yield_raw": 0.05,
+   "url": "https://danjuanfunds.com/funding/007658?channel=1800100001&source=guzhi__web_20171001"
   },
   {
    "code": "CSI931157",
@@ -138,7 +195,14 @@
    "roe": 11.06,
    "dividend_yield": 4.66,
    "eva_type": "high",
-   "date": "10-22"
+   "date": "2026-10-22",
+   "date_text": "10-22",
+   "type": "2",
+   "history_from": "2019-04-25",
+   "pb_flag": false,
+   "peg": 1.1926,
+   "bond_yield_raw": 0.05,
+   "url": "https://danjuanfunds.com/funding/007751?channel=1800100001&source=guzhi__web_20171001"
   },
   {
    "code": "CSIH11136",
@@ -150,7 +214,14 @@
    "roe": 11.2,
    "dividend_yield": 1.2,
    "eva_type": "low",
-   "date": "10-21"
+   "date": "2026-10-21",
+   "date_text": "10-21",
+   "type": "3",
+   "history_from": "2016-07-06",
+   "pb_flag": false,
+   "peg": null,
+   "bond_yield_raw": 0.05,
+   "url": "https://danjuanfunds.com/funding/164906?channel=1800100001&source=guzhi__web_20171001"
   },
   {
    "code": "CSIH30094",
@@ -162,7 +233,14 @@
    "roe": 17.93,
    "dividend_yield": 4.47,
    "eva_type": "low",
-   "date": "10-22"
+   "date": "2026-10-22",
+   "date_text": "10-22",
+   "type": "2",
+   "history_from": "2016-07-06",
+   "pb_flag": false,
+   "peg": 3.189,
+   "bond_yield_raw": 0.05,
+   "url": null
   },
   {
    "code": "CSIH30269",
@@ -174,7 +252,14 @@
    "roe": 10.31,
    "dividend_yield": 4.7,
    "eva_type": "high",
-   "date": "10-22"
+   "date": "2026-10-22",
+   "date_text": "10-22",
+   "type": "2",
+   "history_from": "2016-07-07",
+   "pb_flag": false,
+   "peg": 1.8322,
+   "bond_yield_raw": 0.05,
+   "url": "https://danjuanfunds.com/funding/005279?channel=1800100001&source=guzhi__web_20171001"
   },
   {
    "code": "CSIH30533",
@@ -186,7 +271,14 @@
    "roe": 12.37,
    "dividend_yield": 1.22,
    "eva_type": "low",
-   "date": "10-22"
+   "date": "2026-10-22",
+   "date_text": "10-22",
+   "type": "3",
+   "history_from": "2016-07-07",
+   "pb_flag": false,
+   "peg": null,
+   "bond_yield_raw": 0.05,
+   "url": "https://danjuanfunds.com/funding/006327?channel=1800100001&source=guzhi__web_20171001"
   },
   {
    "code": "CSPSADRP",
@@ -198,7 +290,14 @@
    "roe": 11.6,
    "dividend_yield": 5.0,
    "eva_type": "high",
-   "date": "10-22"
+   "date": "2026-10-22",
+   "date_text": "10-22",
+   "type": "2",
+   "history_from": "2016-07-06",
+   "pb_flag": false,
+   "peg": 2.1383,
+   "bond_yield_raw": 0.05,
+   "url": "https://danjuanfunds.com/funding/501029?channel=1800100001&source=guzhi__web_20171001"
   },
   {
    "code": "GDAXI",
@@ -210,7 +309,14 @@
    "roe": 10.12,
    "dividend_yield": 0.1,
    "eva_type": "high",
-   "date": "10-22"
+   "date": "2026-10-22",
+   "date_text": "10-22",
+   "type": "1",
+   "history_from": "2016-07-06",
+   "pb_flag": false,
+   "peg": null,
+   "bond_yield_raw": 0.05,
+   "url": "https://danjuanfunds.com/funding/000614?channel=1800100001&source=guzhi__web_20171001"
   },
   {
    "code": "HKHSCEI",
@@ -222,7 +328,14 @@
    "roe": 10.04,
    "dividend_yield": 3.24,
    "eva_type": "high",
-   "date": "10-21"
+   "date": "2026-10-21",
+   "date_text": "10-21",
+   "type": "1",
+   "history_from": "2016-07-06",
+   "pb_flag": false,
+   "peg": 1.589,
+   "bond_yield_raw": 0.05,
+   "url": "https://danjuanfunds.com/funding/160717?channel=1800100001&source=guzhi__web_20171001"
   },
   {
    "code": "HKHSI",
@@ -234,7 +347,14 @@
    "roe": 10.55,
    "dividend_yield": 3.46,
    "eva_type": "high",
-   "date": "10-21"
+   "date": "2026-10-21",
+   "date_text": "10-21",
+   "type": "1",
+   "history_from": "2016-07-06",
+   "pb_flag": false,
+   "peg": 1.4268,
+   "bond_yield_raw": 0.05,
+   "url": "https://danjuanfunds.com/funding/000071?channel=1800100001&source=guzhi__web_20171001"
   },
   {
    "code": "HKHSSCNE",
@@ -246,7 +366,14 @@
    "roe": 11.89,
    "dividend_yield": 1.16,
    "eva_type": "mid",
-   "date": "10-21"
+   "date": "2026-10-21",
+   "date_text": "10-21",
+   "type": "2",
+   "history_from": "2018-11-21",
+   "pb_flag": false,
+   "peg": null,
+   "bond_yield_raw": 0.05,
+   "url": null
   },
   {
    "code": "HKHSTECH",
@@ -258,7 +385,14 @@
    "roe": 10.16,
    "dividend_yield": 1.19,
    "eva_type": "low",
-   "date": "10-22"
+   "date": "2026-10-22",
+   "date_text": "10-22",
+   "type": "3",
+   "history_from": "2020-07-27",
+   "pb_flag": false,
+   "peg": null,
+   "bond_yield_raw": 0.05,
+   "url": null
   },
   {
    "code": "HSFML25",
@@ -270,7 +404,14 @@
    "roe": 10.74,
    "dividend_yield": 3.39,
    "eva_type": "mid",
-   "date": "10-21"
+   "date": "2026-10-21",
+   "date_text": "10-21",
+   "type": "1",
+   "history_from": "2016-07-06",
+   "pb_flag": false,
+   "peg": 1.0075,
+   "bond_yield_raw": 0.05,
+   "url": "https://danjuanfunds.com/funding/501301?channel=1800100001&source=guzhi__web_20171001"
   },
   {
    "code": "NDX",
@@ -282,7 +423,14 @@
    "roe": 31.39,
    "dividend_yield": 0.43,
    "eva_type": "high",
-   "date": "10-21"
+   "date": "2026-10-21",
+   "date_text": "10-21",
+   "type": "1",
+   "history_from": "2016-07-05",
+   "pb_flag": false,
+   "peg": 1.4773,
+   "bond_yield_raw": 0.05,
+   "url": "https://danjuanfunds.com/funding/160213?channel=1800100001&source=guzhi__web_20171001"
   },
   {
    "code": "SH000010",
@@ -294,7 +442,14 @@
    "roe": 10.63,
    "dividend_yield": 3.35,
    "eva_type": "high",
-   "date": "10-22"
+   "date": "2026-10-22",
+   "date_text": "10-22",
+   "type": "1",
+   "history_from": "2016-07-07",
+   "pb_flag": false,
+   "peg": 1.0915,
+   "bond_yield_raw": 0.05,
+   "url": "https://danjuanfunds.com/funding/040180?channel=1800100001&source=guzhi__web_20171001"
   },
   {
    "code": "SH000015",
@@ -306,7 +461,14 @@
    "roe": 9.74,
    "dividend_yield": 4.45,
    "eva_type": "high",
-   "date": "10-22"
+   "date": "2026-10-22",
+   "date_text": "10-22",
+   "type": "2",
+   "history_from": "2016-07-05",
+   "pb_flag": false,
+   "peg": 1.4905,
+   "bond_yield_raw": 0.05,
+   "url": null
   },
   {
    "code": "SH000016",
@@ -318,7 +480,14 @@
    "roe": 11.55,
    "dividend_yield": 3.6,
    "eva_type": "high",
-   "date": "10-22"
+   "date": "2026-10-22",
+   "date_text": "10-22",
+   "type": "1",
+   "history_from": "2016-07-07",
+   "pb_flag": false,
+   "peg": 1.301,
+   "bond_yield_raw": 0.05,
+   "url": "https://danjuanfunds.com/funding/110003?channel=1800100001&source=guzhi__web_20171001"
   },
   {
    "code": "SH000170",
@@ -330,7 +499,14 @@
    "roe": 12.76,
    "dividend_yield": 3.44,
    "eva_type": "mid",
-   "date": "10-22"
+   "date": "2026-10-22",
+   "date_text": "10-22",
+   "type": "1",
+   "history_from": "2016-07-07",
+   "pb_flag": false,
+   "peg": 1.3887,
+   "bond_yield_raw": 0.05,
+   "url": "https://danjuanfunds.com/funding/501050?channel=1800100001&source=guzhi__web_20171001"
   },
   {
    "code": "SH000300",
@@ -342,7 +518,14 @@
    "roe": 10.63,
    "dividend_yield": 3.02,
    "eva_type": "mid",
-   "date": "10-22"
+   "date": "2026-10-22",
+   "date_text": "10-22",
+   "type": "1",
+   "history_from": "2016-07-07",
+   "pb_flag": false,
+   "peg": 0.8427,
+   "bond_yield_raw": 0.05,
+   "url": "https://danjuanfunds.com/funding/100038?channel=1800100001&source=guzhi__web_20171001"
   },
   {
    "code": "SH000688",
@@ -354,7 +537,14 @@
    "roe": 5.85,
    "dividend_yield": 0.29,
    "eva_type": "high",
-   "date": "10-22"
+   "date": "2026-10-22",
+   "date_text": "10-22",
+   "type": "1",
+   "history_from": "2019-12-31",
+   "pb_flag": false,
+   "peg": 0.617,
+   "bond_yield_raw": 0.05,
+   "url": null
   },
   {
    "code": "SH000827",
@@ -366,7 +556,14 @@
    "roe": 8.53,
    "dividend_yield": 2.2,
    "eva_type": "mid",
-   "date": "10-22"
+   "date": "2026-10-22",
+   "date_text": "10-22",
+   "type": "3",
+   "history_from": "2016-07-07",
+   "pb_flag": false,
+   "peg": 0.458,
+   "bond_yield_raw": 0.05,
+   "url": "https://danjuanfunds.com/funding/001064?channel=1800100001&source=guzhi__web_20171001"
   },
   {
    "code": "SH000852",
@@ -378,7 +575,14 @@
    "roe": 5.52,
    "dividend_yield": 1.26,
    "eva_type": "mid",
-   "date": "10-22"
+   "date": "2026-10-22",
+   "date_text": "10-22",
+   "type": "1",
+   "history_from": "2016-07-07",
+   "pb_flag": false,
+   "peg": 0.7008,
+   "bond_yield_raw": 0.05,
+   "url": "https://danjuanfunds.com/funding/003646?channel=1800100001&source=guzhi__web_20171001"
   },
   {
    "code": "SH000903",
@@ -390,7 +594,14 @@
    "roe": 11.1,
    "dividend_yield": 2.94,
    "eva_type": "high",
-   "date": "10-22"
+   "date": "2026-10-22",
+   "date_text": "10-22",
+   "type": "1",
+   "history_from": "2016-07-07",
+   "pb_flag": false,
+   "peg": 0.8068,
+   "bond_yield_raw": 0.05,
+   "url": "https://danjuanfunds.com/funding/240014?channel=1800100001&source=guzhi__web_20171001"
   },
   {
    "code": "SH000905",
@@ -402,7 +613,14 @@
    "roe": 7.29,
    "dividend_yield": 1.6,
    "eva_type": "high",
-   "date": "10-22"
+   "date": "2026-10-22",
+   "date_text": "10-22",
+   "type": "1",
+   "history_from": "2016-07-07",
+   "pb_flag": false,
+   "peg": 0.5933,
+   "bond_yield_raw": 0.05,
+   "url": "https://danjuanfunds.com/funding/000478?channel=1800100001&source=guzhi__web_20171001"
   },
   {
    "code": "SH000919",
@@ -414,7 +632,14 @@
    "roe": 10.46,
    "dividend_yield": 4.32,
    "eva_type": "high",
-   "date": "10-22"
+   "date": "2026-10-22",
+   "date_text": "10-22",
+   "type": "2",
+   "history_from": "2016-07-07",
+   "pb_flag": false,
+   "peg": 1.4101,
+   "bond_yield_raw": 0.05,
+   "url": "https://danjuanfunds.com/funding/310398?channel=1800100001&source=guzhi__web_20171001"
   },
   {
    "code": "SH000922",
@@ -426,7 +651,14 @@
    "roe": 9.92,
    "dividend_yield": 4.6,
    "eva_type": "high",
-   "date": "10-22"
+   "date": "2026-10-22",
+   "date_text": "10-22",
+   "type": "2",
+   "history_from": "2016-07-07",
+   "pb_flag": false,
+   "peg": 1.4162,
+   "bond_yield_raw": 0.05,
+   "url": "https://danjuanfunds.com/funding/090010?channel=1800100001&source=guzhi__web_20171001"
   },
   {
    "code": "SH000925",
@@ -438,7 +670,14 @@
    "roe": 10.89,
    "dividend_yield": 4.17,
    "eva_type": "high",
-   "date": "10-22"
+   "date": "2026-10-22",
+   "date_text": "10-22",
+   "type": "2",
+   "history_from": "2016-07-07",
+   "pb_flag": false,
+   "peg": 1.2549,
+   "bond_yield_raw": 0.05,
+   "url": "https://danjuanfunds.com/funding/160716?channel=1800100001&source=guzhi__web_20171001"
   },
   {
    "code": "SH000932",
@@ -450,7 +689,14 @@
    "roe": 14.68,
    "dividend_yield": 3.96,
    "eva_type": "low",
-   "date": "10-22"
+   "date": "2026-10-22",
+   "date_text": "10-22",
+   "type": "3",
+   "history_from": "2016-07-07",
+   "pb_flag": false,
+   "peg": 2.1098,
+   "bond_yield_raw": 0.05,
+   "url": "https://danjuanfunds.com/funding/000248?channel=1800100001&source=guzhi__web_20171001"
   },
   {
    "code": "SH000978",
@@ -462,7 +708,14 @@
    "roe": 9.73,
    "dividend_yield": 1.87,
    "eva_type": "low",
-   "date": "10-22"
+   "date": "2026-10-22",
+   "date_text": "10-22",
+   "type": "3",
+   "history_from": "2016-07-07",
+   "pb_flag": false,
+   "peg": 1.0093,
+   "bond_yield_raw": 0.05,
+   "url": "https://danjuanfunds.com/funding/001550?channel=1800100001&source=guzhi__web_20171001"
   },
   {
    "code": "SH000989",
@@ -474,7 +727,14 @@
    "roe": 9.6,
    "dividend_yield": 2.94,
    "eva_type": "low",
-   "date": "10-22"
+   "date": "2026-10-22",
+   "date_text": "10-22",
+   "type": "3",
+   "history_from": "2016-07-07",
+   "pb_flag": false,
+   "peg": 0.9006,
+   "bond_yield_raw": 0.05,
+   "url": "https://danjuanfunds.com/funding/001133?channel=1800100001&source=guzhi__web_20171001"
   },
   {
    "code": "SH000991",
@@ -486,7 +746,14 @@
    "roe": 9.6,
    "dividend_yield": 1.9,
    "eva_type": "low",
-   "date": "10-22"
+   "date": "2026-10-22",
+   "date_text": "10-22",
+   "type": "3",
+   "history_from": "2016-07-07",
+   "pb_flag": false,
+   "peg": 0.998,
+   "bond_yield_raw": 0.05,
+   "url": "https://danjuanfunds.com/funding/001180?channel=1800100001&source=guzhi__web_20171001"
   },
   {
    "code": "SH000993",
@@ -498,7 +765,14 @@
    "roe": 11.45,
    "dividend_yield": 0.74,
    "eva_type": "mid",
-   "date": "10-22"
+   "date": "2026-10-22",
+   "date_text": "10-22",
+   "type": "3",
+   "history_from": "2016-07-07",
+   "pb_flag": false,
+   "peg": 0.5606,
+   "bond_yield_raw": 0.05,
+   "url": "https://danjuanfunds.com/funding/002974?channel=1800100001&source=guzhi__web_20171001"
   },
   {
    "code": "SP500",
@@ -510,7 +784,14 @@
    "roe": 22.34,
    "dividend_yield": 1.02,
    "eva_type": "high",
-   "date": "10-21"
+   "date": "2026-10-21",
+   "date_text": "10-21",
+   "type": "1",
+   "history_from": "2016-07-06",
+   "pb_flag": false,
+   "peg": 1.6361,
+   "bond_yield_raw": 0.05,
+   "url": "https://danjuanfunds.com/funding/096001?channel=1800100001&source=guzhi__web_20171001"
   },
   {
    "code": "SPACEVCP",
@@ -522,7 +803,14 @@
    "roe": 11.02,
    "dividend_yield": 4.52,
    "eva_type": "high",
-   "date": "10-22"
+   "date": "2026-10-22",
+   "date_text": "10-22",
+   "type": "2",
+   "history_from": "2016-07-08",
+   "pb_flag": false,
+   "peg": 1.5882,
+   "bond_yield_raw": 0.05,
+   "url": "https://danjuanfunds.com/funding/501310?channel=1800100001&source=guzhi__web_20171001"
   },
   {
    "code": "SPCQVCP",
@@ -534,7 +822,14 @@
    "roe": 17.75,
    "dividend_yield": 2.08,
    "eva_type": "high",
-   "date": "10-22"
+   "date": "2026-10-22",
+   "date_text": "10-22",
+   "type": "2",
+   "history_from": "2016-07-07",
+   "pb_flag": false,
+   "peg": 1.8252,
+   "bond_yield_raw": 0.05,
+   "url": "https://danjuanfunds.com/funding/501069?channel=1800100001&source=guzhi__web_20171001"
   },
   {
    "code": "SPHCMSHP",
@@ -546,7 +841,14 @@
    "roe": 7.8,
    "dividend_yield": 2.67,
    "eva_type": "high",
-   "date": "10-21"
+   "date": "2026-10-21",
+   "date_text": "10-21",
+   "type": "1",
+   "history_from": "2016-07-08",
+   "pb_flag": false,
+   "peg": null,
+   "bond_yield_raw": 0.05,
+   "url": "https://danjuanfunds.com/funding/501021?channel=1800100001&source=guzhi__web_20171001"
   },
   {
    "code": "SZ399001",
@@ -558,7 +860,14 @@
    "roe": 9.13,
    "dividend_yield": 1.82,
    "eva_type": "mid",
-   "date": "10-22"
+   "date": "2026-10-22",
+   "date_text": "10-22",
+   "type": "1",
+   "history_from": "2016-07-07",
+   "pb_flag": false,
+   "peg": 0.4177,
+   "bond_yield_raw": 0.05,
+   "url": "https://danjuanfunds.com/funding/163109?channel=1800100001&source=guzhi__web_20171001"
   },
   {
    "code": "SZ399006",
@@ -570,7 +879,14 @@
    "roe": 13.95,
    "dividend_yield": 1.24,
    "eva_type": "low",
-   "date": "10-22"
+   "date": "2026-10-22",
+   "date_text": "10-22",
+   "type": "1",
+   "history_from": "2016-07-07",
+   "pb_flag": false,
+   "peg": 0.41,
+   "bond_yield_raw": 0.05,
+   "url": "https://danjuanfunds.com/funding/110026?channel=1800100001&source=guzhi__web_20171001"
   },
   {
    "code": "SZ399317",
@@ -582,7 +898,14 @@
    "roe": 8.71,
    "dividend_yield": 2.16,
    "eva_type": "high",
-   "date": "10-22"
+   "date": "2026-10-22",
+   "date_text": "10-22",
+   "type": "1",
+   "history_from": "2016-07-07",
+   "pb_flag": false,
+   "peg": 0.8016,
+   "bond_yield_raw": 0.05,
+   "url": "https://danjuanfunds.com/funding/005414?channel=1800100001&source=guzhi__web_20171001"
   },
   {
    "code": "SZ399324",
@@ -594,7 +917,14 @@
    "roe": 15.64,
    "dividend_yield": 4.0,
    "eva_type": "mid",
-   "date": "10-22"
+   "date": "2026-10-22",
+   "date_text": "10-22",
+   "type": "2",
+   "history_from": "2016-07-07",
+   "pb_flag": false,
+   "peg": 0.5931,
+   "bond_yield_raw": 0.05,
+   "url": "https://danjuanfunds.com/funding/481012?channel=1800100001&source=guzhi__web_20171001"
   },
   {
    "code": "SZ399330",
@@ -606,7 +936,14 @@
    "roe": 11.31,
    "dividend_yield": 2.17,
    "eva_type": "mid",
-   "date": "10-22"
+   "date": "2026-10-22",
+   "date_text": "10-22",
+   "type": "1",
+   "history_from": "2016-07-07",
+   "pb_flag": false,
+   "peg": 0.4326,
+   "bond_yield_raw": 0.05,
+   "url": "https://danjuanfunds.com/funding/217016?channel=1800100001&source=guzhi__web_20171001"
   },
   {
    "code": "SZ399393",
@@ -618,7 +955,14 @@
    "roe": 0.0,
    "dividend_yield": 1.2,
    "eva_type": "low",
-   "date": "10-22"
+   "date": "2026-10-22",
+   "date_text": "10-22",
+   "type": "3",
+   "history_from": "2016-07-07",
+   "pb_flag": true,
+   "peg": null,
+   "bond_yield_raw": 0.05,
+   "url": "https://danjuanfunds.com/funding/160218?channel=1800100001&source=guzhi__web_20171001"
   },
   {
    "code": "SZ399396",
@@ -630,7 +974,14 @@
    "roe": 16.94,
    "dividend_yield": 4.07,
    "eva_type": "low",
-   "date": "10-22"
+   "date": "2026-10-22",
+   "date_text": "10-22",
+   "type": "3",
+   "history_from": "2016-07-07",
+   "pb_flag": false,
+   "peg": 2.6248,
+   "bond_yield_raw": 0.05,
+   "url": "https://danjuanfunds.com/funding/160222?channel=1800100001&source=guzhi__web_20171001"
   },
   {
    "code": "SZ399417",
@@ -642,7 +993,14 @@
    "roe": 14.17,
    "dividend_yield": 2.01,
    "eva_type": "low",
-   "date": "10-22"
+   "date": "2026-10-22",
+   "date_text": "10-22",
+   "type": "3",
+   "history_from": "2016-07-07",
+   "pb_flag": true,
+   "peg": 0.3952,
+   "bond_yield_raw": 0.05,
+   "url": "https://danjuanfunds.com/funding/160225?channel=1800100001&source=guzhi__web_20171001"
   },
   {
    "code": "SZ399550",
@@ -654,7 +1012,14 @@
    "roe": 10.15,
    "dividend_yield": 4.22,
    "eva_type": "high",
-   "date": "10-22"
+   "date": "2026-10-22",
+   "date_text": "10-22",
+   "type": "2",
+   "history_from": "2016-07-06",
+   "pb_flag": false,
+   "peg": 1.2372,
+   "bond_yield_raw": 0.05,
+   "url": "https://danjuanfunds.com/funding/165312?channel=1800100001&source=guzhi__web_20171001"
   },
   {
    "code": "SZ399610",
@@ -666,7 +1031,14 @@
    "roe": 15.05,
    "dividend_yield": 0.99,
    "eva_type": "mid",
-   "date": "10-22"
+   "date": "2026-10-22",
+   "date_text": "10-22",
+   "type": "3",
+   "history_from": "2017-06-27",
+   "pb_flag": false,
+   "peg": 0.3516,
+   "bond_yield_raw": 0.05,
+   "url": "https://danjuanfunds.com/funding/160224?channel=1800100001&source=guzhi__web_20171001"
   },
   {
    "code": "SZ399701",
@@ -678,7 +1050,14 @@
    "roe": 9.43,
    "dividend_yield": 3.09,
    "eva_type": "mid",
-   "date": "10-22"
+   "date": "2026-10-22",
+   "date_text": "10-22",
+   "type": "2",
+   "history_from": "2016-07-07",
+   "pb_flag": false,
+   "peg": 0.4258,
+   "bond_yield_raw": 0.05,
+   "url": "https://danjuanfunds.com/funding/530015?channel=1800100001&source=guzhi__web_20171001"
   },
   {
    "code": "SZ399702",
@@ -690,7 +1069,14 @@
    "roe": 9.16,
    "dividend_yield": 2.62,
    "eva_type": "mid",
-   "date": "10-22"
+   "date": "2026-10-22",
+   "date_text": "10-22",
+   "type": "2",
+   "history_from": "2016-07-07",
+   "pb_flag": false,
+   "peg": 0.3782,
+   "bond_yield_raw": 0.05,
+   "url": "https://danjuanfunds.com/funding/070023?channel=1800100001&source=guzhi__web_20171001"
   },
   {
    "code": "SZ399812",
@@ -702,7 +1088,14 @@
    "roe": 19.49,
    "dividend_yield": 3.07,
    "eva_type": "low",
-   "date": "10-22"
+   "date": "2026-10-22",
+   "date_text": "10-22",
+   "type": "3",
+   "history_from": "2016-07-07",
+   "pb_flag": false,
+   "peg": 1.1258,
+   "bond_yield_raw": 0.05,
+   "url": "https://danjuanfunds.com/funding/000968?channel=1800100001&source=guzhi__web_20171001"
   },
   {
    "code": "SZ399967",
@@ -714,7 +1107,14 @@
    "roe": 5.45,
    "dividend_yield": 0.61,
    "eva_type": "mid",
-   "date": "10-22"
+   "date": "2026-10-22",
+   "date_text": "10-22",
+   "type": "3",
+   "history_from": "2016-07-07",
+   "pb_flag": true,
+   "peg": 0.8995,
+   "bond_yield_raw": 0.05,
+   "url": "https://danjuanfunds.com/funding/163115?channel=1800100001&source=guzhi__web_20171001"
   },
   {
    "code": "SZ399971",
@@ -726,7 +1126,14 @@
    "roe": 7.1,
    "dividend_yield": 2.1,
    "eva_type": "low",
-   "date": "10-22"
+   "date": "2026-10-22",
+   "date_text": "10-22",
+   "type": "3",
+   "history_from": "2016-07-07",
+   "pb_flag": false,
+   "peg": 0.7525,
+   "bond_yield_raw": 0.05,
+   "url": "https://danjuanfunds.com/funding/004752?channel=1800100001&source=guzhi__web_20171001"
   },
   {
    "code": "SZ399975",
@@ -738,7 +1145,14 @@
    "roe": 10.14,
    "dividend_yield": 2.49,
    "eva_type": "low",
-   "date": "10-22"
+   "date": "2026-10-22",
+   "date_text": "10-22",
+   "type": "3",
+   "history_from": "2016-07-07",
+   "pb_flag": true,
+   "peg": 0.616,
+   "bond_yield_raw": 0.05,
+   "url": "https://danjuanfunds.com/funding/006098?channel=1800100001&source=guzhi__web_20171001"
   },
   {
    "code": "SZ399986",
@@ -750,7 +1164,14 @@
    "roe": 9.52,
    "dividend_yield": 4.63,
    "eva_type": "high",
-   "date": "10-22"
+   "date": "2026-10-22",
+   "date_text": "10-22",
+   "type": "3",
+   "history_from": "2016-07-07",
+   "pb_flag": true,
+   "peg": 2.091,
+   "bond_yield_raw": 0.05,
+   "url": "https://danjuanfunds.com/funding/240019?channel=1800100001&source=guzhi__web_20171001"
   },
   {
    "code": "SZ399989",
@@ -762,7 +1183,14 @@
    "roe": 11.5,
    "dividend_yield": 1.44,
    "eva_type": "low",
-   "date": "10-22"
+   "date": "2026-10-22",
+   "date_text": "10-22",
+   "type": "3",
+   "history_from": "2016-07-07",
+   "pb_flag": false,
+   "peg": 1.0843,
+   "bond_yield_raw": 0.05,
+   "url": null
   },
   {
    "code": "SZ399997",
@@ -774,7 +1202,14 @@
    "roe": 20.08,
    "dividend_yield": 4.57,
    "eva_type": "low",
-   "date": "10-22"
+   "date": "2026-10-22",
+   "date_text": "10-22",
+   "type": "3",
+   "history_from": "2016-07-07",
+   "pb_flag": false,
+   "peg": 3.8564,
+   "bond_yield_raw": 0.05,
+   "url": "https://danjuanfunds.com/funding/161725?channel=1800100001&source=guzhi__web_20171001"
   },
   {
    "code": "SZ399998",
@@ -786,7 +1221,14 @@
    "roe": 9.46,
    "dividend_yield": 3.13,
    "eva_type": "high",
-   "date": "10-22"
+   "date": "2026-10-22",
+   "date_text": "10-22",
+   "type": "3",
+   "history_from": "2016-07-07",
+   "pb_flag": true,
+   "peg": 0.6749,
+   "bond_yield_raw": 0.05,
+   "url": "https://danjuanfunds.com/funding/161724?channel=1800100001&source=guzhi__web_20171001"
   }
  ]
 }
