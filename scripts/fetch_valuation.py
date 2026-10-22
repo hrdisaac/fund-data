@@ -16,6 +16,7 @@ Local test without network:  python fetch_valuation.py --from-file sample.json
 """
 import json
 import os
+import re
 import sys
 import time
 import urllib.error
@@ -79,22 +80,41 @@ def num(v):
     return f if f == f and abs(f) != float("inf") else None
 
 
-def to_date(v):
-    """Dates come either as text or as millisecond timestamps."""
+def to_date(v, today=None):
+    """Dates come as millisecond timestamps, 'YYYY-MM-DD', or 'MM-DD' (no year: take the latest such day ≤ today)."""
     if v is None:
         return None
     f = num(v)
     if f is not None and f > 1e11:                       # milliseconds since 1970
         return datetime.fromtimestamp(f / 1000, BJ).date().isoformat()
-    s = str(v)
-    return s[:10] if len(s) >= 10 and s[4] == "-" else s
+    s = str(v).strip()
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}.*", s):
+        return s[:10]
+    m = re.fullmatch(r"(\d{1,2})-(\d{1,2})", s)
+    if m and today is not None:
+        mo, d = int(m.group(1)), int(m.group(2))
+        year = today.year if (mo, d) <= (today.month, today.day) else today.year - 1
+        return f"{year}-{mo:02d}-{d:02d}"
+    return s
 
 
-def normalise(items):
+def flag(v):
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, (int, float)):
+        return v != 0
+    if isinstance(v, str):
+        return v.strip().lower() in ("1", "true", "yes", "y")
+    return False
+
+
+def normalise(items, today=None):
     raw_rows = []
     for it in items:
         if not isinstance(it, dict):
             continue
+        ts_date = to_date(first(it, "ts"), today)
+        txt_date = to_date(first(it, "date"), today)
         raw_rows.append({
             "code": first(it, "index_code", "code", "symbol"),
             "name": first(it, "name", "index_name"),
@@ -105,7 +125,15 @@ def normalise(items):
             "roe": num(first(it, "roe")),
             "dividend_yield": num(first(it, "yeild", "yield", "dividend_yield")),
             "eva_type": first(it, "eva_type"),
-            "date": to_date(first(it, "date", "ts", "updated_at")),
+            # prefer a full date; 'ts' is a timestamp, 'date' is often only MM-DD
+            "date": ts_date if ts_date and len(ts_date) == 10 and ts_date[4] == "-" else txt_date,
+            "date_text": first(it, "date"),
+            "type": first(it, "ttype"),
+            "history_from": to_date(first(it, "begin_at"), today),
+            "pb_flag": flag(first(it, "pb_flag")),
+            "peg": num(first(it, "peg")),
+            "bond_yield_raw": num(first(it, "bond_yeild", "bond_yield")),
+            "url": first(it, "url"),
         })
 
     # Percentiles / ROE / yield may be fractions (0.5548) or percents (55.48): decide per column.
@@ -176,7 +204,7 @@ def main():
         log(f"Could not find the index table in the reply. Top-level keys: {keys}")
         sys.exit(1)
 
-    rows, scaling = normalise(items)
+    rows, scaling = normalise(items, datetime.now(BJ).date())
     problem = validate(rows)
     fields_seen = sorted({k for it in items if isinstance(it, dict) for k in it})
     log(f"Fields in the source data: {fields_seen}")
@@ -192,6 +220,7 @@ def main():
         "fetched_at_utc": now.isoformat(timespec="seconds"),
         "fetched_at_beijing": now.astimezone(BJ).strftime("%Y-%m-%d %H:%M:%S"),
         "percent_fields_are": "percent (0–100)",
+        "schema": 2,
         "count": len(rows),
         "fields_seen": fields_seen,
         "items": sorted(rows, key=lambda r: r["code"]),
@@ -217,7 +246,8 @@ def main():
     log("First 5 indices:")
     for r in out["items"][:5]:
         log(f"  {r['code']} {r['name']}: PE {r['pe']} ({r['pe_pct']}%), PB {r['pb']} ({r['pb_pct']}%), "
-            f"ROE {r['roe']}, 股息率 {r['dividend_yield']}, {r['date']}")
+            f"ROE {r['roe']}, 股息率 {r['dividend_yield']}, {r['date']}, type {r['type']!r}, "
+            f"history from {r['history_from']}, pb_flag {r['pb_flag']}")
 
 
 if __name__ == "__main__":
