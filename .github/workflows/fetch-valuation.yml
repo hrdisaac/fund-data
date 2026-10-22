@@ -1,0 +1,43 @@
+# Fetches 蛋卷基金's index valuation table once a day and saves it to data/ in this repository,
+# where the fund viewer can read it. Put this file at:  .github/workflows/fetch-valuation.yml
+name: Fetch index valuation
+
+on:
+  schedule:
+    # GitHub uses UTC. 14:30 UTC = 22:30 Beijing; 23:30 UTC = 07:30 Beijing (a second chance if the first fails).
+    - cron: '30 14 * * *'
+    - cron: '30 23 * * *'
+  workflow_dispatch:        # adds a "Run workflow" button for manual runs
+
+permissions:
+  contents: write           # needed to save the updated data file
+
+concurrency:
+  group: fetch-valuation
+  cancel-in-progress: false
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Fetch and check the valuation data
+        run: python scripts/fetch_valuation.py
+
+      - name: Save the data if it changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/
+          if git diff --cached --quiet; then
+            echo "No changes to save."
+          else
+            git commit -m "Update index valuation $(date -u +%F)"
+            git push
+          fi
