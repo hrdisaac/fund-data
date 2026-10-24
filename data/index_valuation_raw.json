@@ -22,9 +22,9 @@
     "updated_at": 1792751524070,
     "pb_flag": true,
     "source": "5",
-    "date": "10-23",
     "pb_over_history": 0.9016,
-    "pe_over_history": 1
+    "pe_over_history": 1,
+    "date": "10-23"
    },
    {
     "id": 519439,
@@ -48,9 +48,9 @@
     "peg": 1.1502,
     "pb_flag": false,
     "source": "5",
-    "date": "10-23",
     "pb_over_history": 0.9928,
-    "pe_over_history": 0.9968
+    "pe_over_history": 0.9968,
+    "date": "10-23"
    },
    {
     "id": 519437,
@@ -74,18 +74,18 @@
     "peg": 0.6212,
     "pb_flag": true,
     "source": "5",
-    "date": "10-23",
     "pb_over_history": 0.9624,
-    "pe_over_history": 0.9992
+    "pe_over_history": 0.9992,
+    "date": "10-23"
    },
    {
-    "id": 519404,
+    "id": 519483,
     "index_code": "CSIH30533",
     "name": "中概互联50",
     "ttype": "3",
-    "pe": 15.1136,
-    "pb": 1.8699,
-    "pe_percentile": 0.006,
+    "pe": 15.1049,
+    "pb": 1.8688,
+    "pe_percentile": 0.0056,
     "pb_percentile": 0.0032,
     "roe": 0.1237,
     "yeild": 0.0121,
@@ -95,45 +95,45 @@
     "url": "https://danjuanfunds.com/funding/006327?channel=1800100001&source=guzhi__web_20171001",
     "bond_yeild": 0.05,
     "begin_at": 1467907200000,
-    "created_at": 1792751523414,
-    "updated_at": 1792751523414,
+    "created_at": 1792805521652,
+    "updated_at": 1792805521652,
     "pb_flag": false,
     "source": "5",
-    "date": "10-23",
     "pb_over_history": 0.9968,
-    "pe_over_history": 0.994
+    "pe_over_history": 0.9944,
+    "date": "10-23"
    },
    {
-    "id": 519362,
+    "id": 519479,
     "index_code": "CSIH11136",
     "name": "中国互联",
     "ttype": "3",
-    "pe": 17.2305,
-    "pb": 1.9296,
-    "pe_percentile": 0.1148,
-    "pb_percentile": 0.0048,
+    "pe": 17.4297,
+    "pb": 1.9519,
+    "pe_percentile": 0.1268,
+    "pb_percentile": 0.006,
     "roe": 0.112,
-    "yeild": 0.0126,
-    "ts": 1792598400000,
+    "yeild": 0.0124,
+    "ts": 1792684800000,
     "eva_type": "low",
     "eva_type_int": 0,
     "url": "https://danjuanfunds.com/funding/164906?channel=1800100001&source=guzhi__web_20171001",
     "bond_yeild": 0.05,
-    "begin_at": 1467820800000,
-    "created_at": 1792719121357,
-    "updated_at": 1792719121357,
+    "begin_at": 1467907200000,
+    "created_at": 1792805521224,
+    "updated_at": 1792805521224,
     "pb_flag": false,
     "source": "5",
-    "date": "10-22",
-    "pb_over_history": 0.9952,
-    "pe_over_history": 0.8852
+    "pb_over_history": 0.994,
+    "pe_over_history": 0.8732,
+    "date": "10-23"
    },
    {
-    "id": 519457,
+    "id": 519482,
     "index_code": "SZ399417",
     "name": "新能源车",
     "ttype": "3",
-    "pe": 18.1407,
+    "pe": 18.1406,
     "pb": 2.5731,
     "pe_percentile": 0.0876,
     "pb_percentile": 0.2252,
@@ -145,14 +145,14 @@
     "url": "https://danjuanfunds.com/funding/160225?channel=1800100001&source=guzhi__web_20171001",
     "bond_yeild": 0.05,
     "begin_at": 1467907200000,
-    "created_at": 1792769523000,
-    "updated_at": 1792769523000,
+    "created_at": 1792805521560,
+    "updated_at": 1792805521560,
     "peg": 0.4214,
     "pb_flag": true,
     "source": "5",
-    "date": "10-23",
     "pb_over_history": 0.7748,
-    "pe_over_history": 0.9124
+    "pe_over_history": 0.9124,
+    "date": "10-23"
    },
    {
     "id": 519469,
@@ -176,9 +176,9 @@
     "peg": 3.2486,
     "pb_flag": false,
     "source": "5",
-    "date": "10-23",
     "pb_over_history": 0.9664,
-    "pe_over_history": 0.8348
+    "pe_over_history": 0.8348,
+    "date": "10-23"
    },
    {
     "id": 519440,
@@ -202,9 +202,9 @@
     "peg": 0.9265,
     "pb_flag": false,
     "source": "5",
-    "date": "10-23",
     "pb_over_history": 0.896,
-    "pe_over_history": 0.8196
+    "pe_over_history": 0.8196,
+    "date": "10-23"
    },
    {
     "id": 519435,
@@ -228,9 +228,9 @@
     "peg": 3.933,
     "pb_flag": false,
     "source": "5",
-    "date": "10-23",
     "pb_over_history": 0.9652,
-    "pe_over_history": 0.7888
+    "pe_over_history": 0.7888,
+    "date": "10-23"
    },
    {
     "id": 519420,
@@ -253,34 +253,9 @@
     "updated_at": 1792751524767,
     "pb_flag": false,
     "source": "5",
-    "date": "10-23",
     "pb_over_history": 0.9419,
-    "pe_over_history": 0.8923
-   },
-   {
-    "id": 519367,
-    "index_code": "HKHSSCNE",
-    "name": "新经济",
-    "ttype": "2",
-    "pe": 20.7461,
-    "pb": 2.4658,
-    "pe_percentile": 0.1839,
-    "pb_percentile": 0.2552,
-    "roe": 0.1189,
-    "yeild": 0.0122,
-    "ts": 1792598400000,
-    "eva_type": "low",
-    "eva_type_int": 0,
-    "url": "",
-    "bond_yeild": 0.05,
-    "begin_at": 1542729600000,
-    "created_at": 1792719122096,
-    "updated_at": 1792719122096,
-    "pb_flag": false,
-    "source": "5",
-    "date": "10-22",
-    "pb_over_history": 0.7448,
-    "pe_over_history": 0.8161
+    "pe_over_history": 0.8923,
+    "date": "10-23"
    },
    {
     "id": 519438,
@@ -304,9 +279,34 @@
     "peg": 2.6782,
     "pb_flag": false,
     "source": "5",
-    "date": "10-23",
     "pb_over_history": 0.972,
-    "pe_over_history": 0.8592
+    "pe_over_history": 0.8592,
+    "date": "10-23"
+   },
+   {
+    "id": 519485,
+    "index_code": "HKHSSCNE",
+    "name": "新经济",
+    "ttype": "2",
+    "pe": 21.1898,
+    "pb": 2.5185,
+    "pe_percentile": 0.215,
+    "pb_percentile": 0.278,
+    "roe": 0.1189,
+    "yeild": 0.0121,
+    "ts": 1792684800000,
+    "eva_type": "low",
+    "eva_type_int": 0,
+    "url": "",
+    "bond_yeild": 0.05,
+    "begin_at": 1542729600000,
+    "created_at": 1792805521938,
+    "updated_at": 1792805521938,
+    "pb_flag": false,
+    "source": "5",
+    "pb_over_history": 0.722,
+    "pe_over_history": 0.785,
+    "date": "10-23"
    },
    {
     "id": 519450,
@@ -330,9 +330,9 @@
     "peg": 2.1511,
     "pb_flag": false,
     "source": "5",
-    "date": "10-23",
     "pb_over_history": 0.968,
-    "pe_over_history": 0.7644
+    "pe_over_history": 0.7644,
+    "date": "10-23"
    },
    {
     "id": 519464,
@@ -356,9 +356,9 @@
     "peg": 1.1146,
     "pb_flag": false,
     "source": "5",
-    "date": "10-23",
     "pb_over_history": 0.8916,
-    "pe_over_history": 0.8276
+    "pe_over_history": 0.8276,
+    "date": "10-23"
    },
    {
     "id": 519410,
@@ -382,9 +382,9 @@
     "peg": 0.78,
     "pb_flag": false,
     "source": "5",
-    "date": "10-23",
     "pb_over_history": 0.78,
-    "pe_over_history": 0.7216
+    "pe_over_history": 0.7216,
+    "date": "10-23"
    },
    {
     "id": 519441,
@@ -408,16 +408,16 @@
     "peg": 1.0232,
     "pb_flag": false,
     "source": "5",
-    "date": "10-23",
     "pb_over_history": 0.9352,
-    "pe_over_history": 0.7032
+    "pe_over_history": 0.7032,
+    "date": "10-23"
    },
    {
-    "id": 519431,
+    "id": 519478,
     "index_code": "SZ399006",
     "name": "创业板",
     "ttype": "1",
-    "pe": 31.3614,
+    "pe": 31.3613,
     "pb": 4.3197,
     "pe_percentile": 0.1724,
     "pb_percentile": 0.2924,
@@ -429,40 +429,40 @@
     "url": "https://danjuanfunds.com/funding/110026?channel=1800100001&source=guzhi__web_20171001",
     "bond_yeild": 0.05,
     "begin_at": 1467907200000,
-    "created_at": 1792769520737,
-    "updated_at": 1792769520737,
+    "created_at": 1792805520992,
+    "updated_at": 1792805520992,
     "peg": 0.4332,
     "pb_flag": false,
     "source": "5",
-    "date": "10-23",
     "pb_over_history": 0.7076,
-    "pe_over_history": 0.8276
+    "pe_over_history": 0.8276,
+    "date": "10-23"
    },
    {
-    "id": 519359,
+    "id": 519476,
     "index_code": "HSFML25",
     "name": "香港大盘",
     "ttype": "1",
-    "pe": 8.64,
-    "pb": 0.9276,
-    "pe_percentile": 0.3452,
-    "pb_percentile": 0.2536,
-    "roe": 0.1074,
-    "yeild": 0.0349,
-    "ts": 1792598400000,
+    "pe": 8.6379,
+    "pb": 0.9305,
+    "pe_percentile": 0.3444,
+    "pb_percentile": 0.2588,
+    "roe": 0.1077,
+    "yeild": 0.0347,
+    "ts": 1792684800000,
     "eva_type": "mid",
     "eva_type_int": 1,
     "url": "https://danjuanfunds.com/funding/501301?channel=1800100001&source=guzhi__web_20171001",
     "bond_yeild": 0.05,
-    "begin_at": 1467820800000,
-    "created_at": 1792719120834,
-    "updated_at": 1792719120834,
-    "peg": 0.9833,
+    "begin_at": 1467907200000,
+    "created_at": 1792805520776,
+    "updated_at": 1792805520776,
+    "peg": 0.983,
     "pb_flag": false,
     "source": "5",
-    "date": "10-22",
-    "pb_over_history": 0.7464,
-    "pe_over_history": 0.6548
+    "pb_over_history": 0.7412,
+    "pe_over_history": 0.6556,
+    "date": "10-23"
    },
    {
     "id": 519428,
@@ -486,35 +486,9 @@
     "peg": 1.4046,
     "pb_flag": false,
     "source": "5",
-    "date": "10-23",
     "pb_over_history": 0.5044,
-    "pe_over_history": 0.7784
-   },
-   {
-    "id": 519358,
-    "index_code": "HKHSCEI",
-    "name": "国企指数",
-    "ttype": "1",
-    "pe": 8.9157,
-    "pb": 0.8954,
-    "pe_percentile": 0.554,
-    "pb_percentile": 0.2996,
-    "roe": 0.1004,
-    "yeild": 0.0335,
-    "ts": 1792598400000,
-    "eva_type": "mid",
-    "eva_type_int": 1,
-    "url": "https://danjuanfunds.com/funding/160717?channel=1800100001&source=guzhi__web_20171001",
-    "bond_yeild": 0.05,
-    "begin_at": 1467820800000,
-    "created_at": 1792719120708,
-    "updated_at": 1792719120708,
-    "peg": 1.5487,
-    "pb_flag": false,
-    "source": "5",
-    "date": "10-22",
-    "pb_over_history": 0.7004,
-    "pe_over_history": 0.446
+    "pe_over_history": 0.7784,
+    "date": "10-23"
    },
    {
     "id": 519426,
@@ -538,9 +512,9 @@
     "peg": 0.8504,
     "pb_flag": false,
     "source": "5",
-    "date": "10-23",
     "pb_over_history": 0.7324,
-    "pe_over_history": 0.4836
+    "pe_over_history": 0.4836,
+    "date": "10-23"
    },
    {
     "id": 519452,
@@ -564,9 +538,9 @@
     "peg": 0.4412,
     "pb_flag": false,
     "source": "5",
-    "date": "10-23",
     "pb_over_history": 0.96,
-    "pe_over_history": 0.6252
+    "pe_over_history": 0.6252,
+    "date": "10-23"
    },
    {
     "id": 519453,
@@ -590,9 +564,9 @@
     "peg": 0.3905,
     "pb_flag": false,
     "source": "5",
-    "date": "10-23",
     "pb_over_history": 0.848,
-    "pe_over_history": 0.518
+    "pe_over_history": 0.518,
+    "date": "10-23"
    },
    {
     "id": 519429,
@@ -616,9 +590,9 @@
     "peg": 0.4474,
     "pb_flag": false,
     "source": "5",
-    "date": "10-23",
     "pb_over_history": 0.8016,
-    "pe_over_history": 0.6128
+    "pe_over_history": 0.6128,
+    "date": "10-23"
    },
    {
     "id": 519434,
@@ -642,9 +616,9 @@
     "peg": 0.4764,
     "pb_flag": false,
     "source": "5",
-    "date": "10-23",
     "pb_over_history": 0.8588,
-    "pe_over_history": 0.6484
+    "pe_over_history": 0.6484,
+    "date": "10-23"
    },
    {
     "id": 519455,
@@ -668,9 +642,9 @@
     "peg": 0.4311,
     "pb_flag": false,
     "source": "5",
-    "date": "10-23",
     "pb_over_history": 0.7548,
-    "pe_over_history": 0.5428
+    "pe_over_history": 0.5428,
+    "date": "10-23"
    },
    {
     "id": 519462,
@@ -694,9 +668,9 @@
     "peg": 0.3631,
     "pb_flag": false,
     "source": "5",
-    "date": "10-23",
     "pb_over_history": 0.39,
-    "pe_over_history": 0.748
+    "pe_over_history": 0.748,
+    "date": "10-23"
    },
    {
     "id": 519456,
@@ -720,9 +694,9 @@
     "peg": 1.0349,
     "pb_flag": false,
     "source": "5",
-    "date": "10-23",
     "pb_over_history": 0.9288,
-    "pe_over_history": 0.6648
+    "pe_over_history": 0.6648,
+    "date": "10-23"
    },
    {
     "id": 519430,
@@ -746,9 +720,9 @@
     "peg": 0.717,
     "pb_flag": false,
     "source": "5",
-    "date": "10-23",
     "pb_over_history": 0.7888,
-    "pe_over_history": 0.5
+    "pe_over_history": 0.5,
+    "date": "10-23"
    },
    {
     "id": 519442,
@@ -772,9 +746,9 @@
     "peg": 0.5778,
     "pb_flag": false,
     "source": "5",
-    "date": "10-23",
     "pb_over_history": 0.13,
-    "pe_over_history": 0.7656
+    "pe_over_history": 0.7656,
+    "date": "10-23"
    },
    {
     "id": 519436,
@@ -798,9 +772,9 @@
     "peg": 0.9188,
     "pb_flag": true,
     "source": "5",
-    "date": "10-23",
     "pb_over_history": 0.5464,
-    "pe_over_history": 0.718
+    "pe_over_history": 0.718,
+    "date": "10-23"
    },
    {
     "id": 519368,
@@ -824,9 +798,9 @@
     "peg": 1.5888,
     "pb_flag": false,
     "source": "5",
-    "date": "10-23",
     "pb_over_history": 0.3992,
-    "pe_over_history": 0.3892
+    "pe_over_history": 0.3892,
+    "date": "10-23"
    },
    {
     "id": 519433,
@@ -850,9 +824,9 @@
     "peg": 2.0412,
     "pb_flag": true,
     "source": "5",
-    "date": "10-23",
     "pb_over_history": 0.4868,
-    "pe_over_history": 0.0308
+    "pe_over_history": 0.0308,
+    "date": "10-23"
    },
    {
     "id": 519459,
@@ -876,9 +850,9 @@
     "peg": 1.1914,
     "pb_flag": false,
     "source": "5",
-    "date": "10-23",
     "pb_over_history": 0.451,
-    "pe_over_history": 0.4318
+    "pe_over_history": 0.4318,
+    "date": "10-23"
    },
    {
     "id": 519448,
@@ -902,9 +876,9 @@
     "peg": 1.8064,
     "pb_flag": false,
     "source": "5",
-    "date": "10-23",
     "pb_over_history": 0.3404,
-    "pe_over_history": 0.2008
+    "pe_over_history": 0.2008,
+    "date": "10-23"
    },
    {
     "id": 519432,
@@ -928,9 +902,9 @@
     "peg": 1.3958,
     "pb_flag": false,
     "source": "5",
-    "date": "10-23",
     "pb_over_history": 0.4296,
-    "pe_over_history": 0.1512
+    "pe_over_history": 0.1512,
+    "date": "10-23"
    },
    {
     "id": 519451,
@@ -954,9 +928,35 @@
     "peg": 1.3982,
     "pb_flag": false,
     "source": "5",
-    "date": "10-23",
     "pb_over_history": 0.5104,
-    "pe_over_history": 0.3376
+    "pe_over_history": 0.3376,
+    "date": "10-23"
+   },
+   {
+    "id": 519475,
+    "index_code": "HKHSCEI",
+    "name": "国企指数",
+    "ttype": "1",
+    "pe": 8.9153,
+    "pb": 0.8981,
+    "pe_percentile": 0.5532,
+    "pb_percentile": 0.3064,
+    "roe": 0.1007,
+    "yeild": 0.0332,
+    "ts": 1792684800000,
+    "eva_type": "high",
+    "eva_type_int": 2,
+    "url": "https://danjuanfunds.com/funding/160717?channel=1800100001&source=guzhi__web_20171001",
+    "bond_yeild": 0.05,
+    "begin_at": 1467907200000,
+    "created_at": 1792805520693,
+    "updated_at": 1792805520693,
+    "peg": 1.5486,
+    "pb_flag": false,
+    "source": "5",
+    "pb_over_history": 0.6936,
+    "pe_over_history": 0.4468,
+    "date": "10-23"
    },
    {
     "id": 519416,
@@ -980,9 +980,9 @@
     "peg": 1.4627,
     "pb_flag": false,
     "source": "5",
-    "date": "10-23",
     "pb_over_history": 0.3392,
-    "pe_over_history": 0.0132
+    "pe_over_history": 0.0132,
+    "date": "10-23"
    },
    {
     "id": 519443,
@@ -1006,9 +1006,9 @@
     "peg": 1.2585,
     "pb_flag": false,
     "source": "5",
-    "date": "10-23",
     "pb_over_history": 0.594,
-    "pe_over_history": 0.4788
+    "pe_over_history": 0.4788,
+    "date": "10-23"
    },
    {
     "id": 519463,
@@ -1032,35 +1032,35 @@
     "peg": 3.0249,
     "pb_flag": false,
     "source": "5",
-    "date": "10-23",
     "pb_over_history": 0.4696,
-    "pe_over_history": 0.0836
+    "pe_over_history": 0.0836,
+    "date": "10-23"
    },
    {
-    "id": 519357,
+    "id": 519474,
     "index_code": "HKHSI",
     "name": "恒生指数",
     "ttype": "1",
-    "pe": 10.0913,
-    "pb": 1.0643,
-    "pe_percentile": 0.3948,
-    "pb_percentile": 0.4184,
-    "roe": 0.1055,
-    "yeild": 0.0356,
-    "ts": 1792598400000,
+    "pe": 10.1223,
+    "pb": 1.0711,
+    "pe_percentile": 0.4024,
+    "pb_percentile": 0.4332,
+    "roe": 0.1058,
+    "yeild": 0.0354,
+    "ts": 1792684800000,
     "eva_type": "high",
     "eva_type_int": 2,
     "url": "https://danjuanfunds.com/funding/000071?channel=1800100001&source=guzhi__web_20171001",
     "bond_yeild": 0.05,
-    "begin_at": 1467820800000,
-    "created_at": 1792719120610,
-    "updated_at": 1792719120610,
-    "peg": 1.3867,
+    "begin_at": 1467907200000,
+    "created_at": 1792805520558,
+    "updated_at": 1792805520558,
+    "peg": 1.391,
     "pb_flag": false,
     "source": "5",
-    "date": "10-22",
-    "pb_over_history": 0.5816,
-    "pe_over_history": 0.6052
+    "pb_over_history": 0.5668,
+    "pe_over_history": 0.5976,
+    "date": "10-23"
    },
    {
     "id": 519444,
@@ -1084,9 +1084,9 @@
     "peg": 1.2252,
     "pb_flag": false,
     "source": "5",
-    "date": "10-23",
     "pb_over_history": 0.6764,
-    "pe_over_history": 0.1748
+    "pe_over_history": 0.1748,
+    "date": "10-23"
    },
    {
     "id": 519461,
@@ -1110,9 +1110,9 @@
     "peg": 2.1605,
     "pb_flag": false,
     "source": "5",
-    "date": "10-23",
     "pb_over_history": 0.078,
-    "pe_over_history": 0.0064
+    "pe_over_history": 0.0064,
+    "date": "10-23"
    },
    {
     "id": 519425,
@@ -1136,9 +1136,9 @@
     "peg": 1.2995,
     "pb_flag": false,
     "source": "5",
-    "date": "10-23",
     "pb_over_history": 0.4744,
-    "pe_over_history": 0.4368
+    "pe_over_history": 0.4368,
+    "date": "10-23"
    },
    {
     "id": 519454,
@@ -1162,16 +1162,16 @@
     "peg": 1.092,
     "pb_flag": false,
     "source": "5",
-    "date": "10-23",
     "pb_over_history": 0.6516,
-    "pe_over_history": 0.43
+    "pe_over_history": 0.43,
+    "date": "10-23"
    },
    {
-    "id": 519465,
+    "id": 519484,
     "index_code": "CSI716567",
     "name": "MSCI中国",
     "ttype": "1",
-    "pe": 13.0002,
+    "pe": 13.0027,
     "pb": 1.4364,
     "pe_percentile": 0.5464,
     "pb_percentile": 0.4504,
@@ -1183,14 +1183,14 @@
     "url": "",
     "bond_yeild": 0.05,
     "begin_at": 1508688000000,
-    "created_at": 1792769523627,
-    "updated_at": 1792769523627,
+    "created_at": 1792805521819,
+    "updated_at": 1792805521819,
     "peg": 0.7819,
     "pb_flag": false,
     "source": "5",
-    "date": "10-23",
     "pb_over_history": 0.5496,
-    "pe_over_history": 0.4536
+    "pe_over_history": 0.4536,
+    "date": "10-23"
    },
    {
     "id": 519446,
@@ -1214,9 +1214,9 @@
     "peg": 0.623,
     "pb_flag": false,
     "source": "5",
-    "date": "10-23",
     "pb_over_history": 0.3148,
-    "pe_over_history": 0.6368
+    "pe_over_history": 0.6368,
+    "date": "10-23"
    },
    {
     "id": 519369,
@@ -1240,34 +1240,9 @@
     "peg": 1.8252,
     "pb_flag": false,
     "source": "5",
-    "date": "10-23",
     "pb_over_history": 0.6152,
-    "pe_over_history": 0.6028
-   },
-   {
-    "id": 519364,
-    "index_code": "SPHCMSHP",
-    "name": "香港中小",
-    "ttype": "1",
-    "pe": 15.6476,
-    "pb": 1.2222,
-    "pe_percentile": 0.6509,
-    "pb_percentile": 0.4051,
-    "roe": 0.0781,
-    "yeild": 0.0279,
-    "ts": 1792598400000,
-    "eva_type": "high",
-    "eva_type_int": 2,
-    "url": "https://danjuanfunds.com/funding/501021?channel=1800100001&source=guzhi__web_20171001",
-    "bond_yeild": 0.05,
-    "begin_at": 1467907200000,
-    "created_at": 1792719121569,
-    "updated_at": 1792719121569,
-    "pb_flag": false,
-    "source": "5",
-    "date": "10-22",
-    "pb_over_history": 0.5949,
-    "pe_over_history": 0.3491
+    "pe_over_history": 0.6028,
+    "date": "10-23"
    },
    {
     "id": 519458,
@@ -1291,9 +1266,9 @@
     "peg": 0.5078,
     "pb_flag": false,
     "source": "5",
-    "date": "10-23",
     "pb_over_history": 0.2,
-    "pe_over_history": 0.2484
+    "pe_over_history": 0.2484,
+    "date": "10-23"
    },
    {
     "id": 519445,
@@ -1317,34 +1292,59 @@
     "peg": 0.8208,
     "pb_flag": false,
     "source": "5",
-    "date": "10-23",
     "pb_over_history": 0.1336,
-    "pe_over_history": 0.1116
+    "pe_over_history": 0.1116,
+    "date": "10-23"
    },
    {
-    "id": 519422,
+    "id": 519480,
+    "index_code": "SPHCMSHP",
+    "name": "香港中小",
+    "ttype": "1",
+    "pe": 16.055,
+    "pb": 1.2443,
+    "pe_percentile": 0.6959,
+    "pb_percentile": 0.4294,
+    "roe": 0.0775,
+    "yeild": 0.0274,
+    "ts": 1792684800000,
+    "eva_type": "high",
+    "eva_type_int": 2,
+    "url": "https://danjuanfunds.com/funding/501021?channel=1800100001&source=guzhi__web_20171001",
+    "bond_yeild": 0.05,
+    "begin_at": 1467907200000,
+    "created_at": 1792805521338,
+    "updated_at": 1792805521338,
+    "pb_flag": false,
+    "source": "5",
+    "pb_over_history": 0.5706,
+    "pe_over_history": 0.3041,
+    "date": "10-23"
+   },
+   {
+    "id": 519486,
     "index_code": "GDAXI",
     "name": "德国DAX",
     "ttype": "1",
-    "pe": 16.9416,
-    "pb": 1.7144,
-    "pe_percentile": 0.4648,
-    "pb_percentile": 0.5412,
-    "roe": 0.1012,
-    "yeild": 0.001,
+    "pe": 17.8101,
+    "pb": 2.0404,
+    "pe_percentile": 0.5116,
+    "pb_percentile": 0.9364,
+    "roe": 0.1146,
+    "yeild": 0.0255,
     "ts": 1792684800000,
     "eva_type": "high",
     "eva_type_int": 2,
     "url": "https://danjuanfunds.com/funding/000614?channel=1800100001&source=guzhi__web_20171001",
     "bond_yeild": 0.05,
     "begin_at": 1467820800000,
-    "created_at": 1792751524900,
-    "updated_at": 1792751524900,
+    "created_at": 1792805522096,
+    "updated_at": 1792805522096,
     "pb_flag": false,
     "source": "5",
-    "date": "10-23",
-    "pb_over_history": 0.4588,
-    "pe_over_history": 0.5352
+    "pb_over_history": 0.0636,
+    "pe_over_history": 0.4884,
+    "date": "10-23"
    },
    {
     "id": 519447,
@@ -1368,16 +1368,16 @@
     "peg": 1.026,
     "pb_flag": false,
     "source": "5",
-    "date": "10-23",
     "pb_over_history": 0.3868,
-    "pe_over_history": 0.6612
+    "pe_over_history": 0.6612,
+    "date": "10-23"
    },
    {
-    "id": 519449,
+    "id": 519481,
     "index_code": "SZ399317",
     "name": "国证A指",
     "ttype": "1",
-    "pe": 18.7427,
+    "pe": 18.7447,
     "pb": 1.6347,
     "pe_percentile": 0.6048,
     "pb_percentile": 0.364,
@@ -1389,14 +1389,14 @@
     "url": "https://danjuanfunds.com/funding/005414?channel=1800100001&source=guzhi__web_20171001",
     "bond_yeild": 0.05,
     "begin_at": 1467907200000,
-    "created_at": 1792769522255,
-    "updated_at": 1792769522255,
+    "created_at": 1792805521429,
+    "updated_at": 1792805521429,
     "peg": 0.8132,
     "pb_flag": false,
     "source": "5",
-    "date": "10-23",
     "pb_over_history": 0.636,
-    "pe_over_history": 0.3952
+    "pe_over_history": 0.3952,
+    "date": "10-23"
    },
    {
     "id": 519381,
@@ -1420,72 +1420,72 @@
     "peg": 0.6753,
     "pb_flag": true,
     "source": "5",
-    "date": "10-23",
     "pb_over_history": 0.0296,
-    "pe_over_history": 0.1376
+    "pe_over_history": 0.1376,
+    "date": "10-23"
    },
    {
-    "id": 519353,
+    "id": 519470,
     "index_code": "SP500",
     "name": "标普500",
     "ttype": "1",
-    "pe": 24.6449,
-    "pb": 5.5078,
-    "pe_percentile": 0.5224,
-    "pb_percentile": 0.934,
-    "roe": 0.2235,
-    "yeild": 0.0103,
-    "ts": 1792598400000,
+    "pe": 24.4394,
+    "pb": 5.4704,
+    "pe_percentile": 0.5084,
+    "pb_percentile": 0.9192,
+    "roe": 0.2238,
+    "yeild": 0.0104,
+    "ts": 1792684800000,
     "eva_type": "high",
     "eva_type_int": 2,
     "url": "https://danjuanfunds.com/funding/096001?channel=1800100001&source=guzhi__web_20171001",
     "bond_yeild": 0.05,
-    "begin_at": 1467820800000,
-    "created_at": 1792719120266,
-    "updated_at": 1792719120266,
-    "peg": 1.6205,
+    "begin_at": 1467907200000,
+    "created_at": 1792805520208,
+    "updated_at": 1792805520208,
+    "peg": 1.607,
     "pb_flag": false,
     "source": "5",
-    "date": "10-22",
-    "pb_over_history": 0.066,
-    "pe_over_history": 0.4776
+    "pb_over_history": 0.0808,
+    "pe_over_history": 0.4916,
+    "date": "10-23"
    },
    {
-    "id": 519355,
+    "id": 519472,
     "index_code": "NDX",
     "name": "纳指100",
     "ttype": "1",
-    "pe": 28.7417,
-    "pb": 9.0366,
-    "pe_percentile": 0.388,
-    "pb_percentile": 0.7512,
+    "pe": 28.681,
+    "pb": 9.0177,
+    "pe_percentile": 0.3864,
+    "pb_percentile": 0.7448,
     "roe": 0.3144,
     "yeild": 0.0045,
-    "ts": 1792598400000,
+    "ts": 1792684800000,
     "eva_type": "high",
     "eva_type_int": 2,
     "url": "https://danjuanfunds.com/funding/160213?channel=1800100001&source=guzhi__web_20171001",
     "bond_yeild": 0.05,
-    "begin_at": 1467734400000,
-    "created_at": 1792719120430,
-    "updated_at": 1792719120430,
-    "peg": 1.4265,
+    "begin_at": 1467820800000,
+    "created_at": 1792805520404,
+    "updated_at": 1792805520404,
+    "peg": 1.4234,
     "pb_flag": false,
     "source": "5",
-    "date": "10-22",
-    "pb_over_history": 0.2488,
-    "pe_over_history": 0.612
+    "pb_over_history": 0.2552,
+    "pe_over_history": 0.6136,
+    "date": "10-23"
    },
    {
-    "id": 519427,
+    "id": 519477,
     "index_code": "SH000905",
     "name": "中证500",
     "ttype": "1",
-    "pe": 29.3322,
-    "pb": 2.1356,
+    "pe": 29.3545,
+    "pb": 2.1349,
     "pe_percentile": 0.688,
-    "pb_percentile": 0.6664,
-    "roe": 0.0728,
+    "pb_percentile": 0.666,
+    "roe": 0.0727,
     "yeild": 0.0157,
     "ts": 1792684800000,
     "eva_type": "high",
@@ -1493,14 +1493,14 @@
     "url": "https://danjuanfunds.com/funding/000478?channel=1800100001&source=guzhi__web_20171001",
     "bond_yeild": 0.05,
     "begin_at": 1467907200000,
-    "created_at": 1792769520388,
-    "updated_at": 1792769520388,
+    "created_at": 1792805520879,
+    "updated_at": 1792805520879,
     "peg": 0.6089,
     "pb_flag": false,
     "source": "5",
-    "date": "10-23",
-    "pb_over_history": 0.3336,
-    "pe_over_history": 0.312
+    "pb_over_history": 0.334,
+    "pe_over_history": 0.312,
+    "date": "10-23"
    },
    {
     "id": 519421,
@@ -1523,9 +1523,9 @@
     "updated_at": 1792751524827,
     "pb_flag": false,
     "source": "5",
-    "date": "10-23",
     "pb_over_history": 0.2852,
-    "pe_over_history": 0.2852
+    "pe_over_history": 0.2852,
+    "date": "10-23"
    },
    {
     "id": 519467,
@@ -1549,9 +1549,9 @@
     "peg": 0.3395,
     "pb_flag": false,
     "source": "5",
-    "date": "10-23",
     "pb_over_history": 0.2237,
-    "pe_over_history": 0.4474
+    "pe_over_history": 0.4474,
+    "date": "10-23"
    },
    {
     "id": 519460,
@@ -1575,9 +1575,9 @@
     "peg": 0.4317,
     "pb_flag": false,
     "source": "5",
-    "date": "10-23",
     "pb_over_history": 0.3411,
-    "pe_over_history": 0.628
+    "pe_over_history": 0.628,
+    "date": "10-23"
    },
    {
     "id": 519466,
@@ -1601,9 +1601,9 @@
     "peg": 0.5515,
     "pb_flag": false,
     "source": "5",
-    "date": "10-23",
     "pb_over_history": 0.1388,
-    "pe_over_history": 0.5684
+    "pe_over_history": 0.5684,
+    "date": "10-23"
    },
    {
     "id": 519468,
@@ -1627,9 +1627,9 @@
     "peg": 0.642,
     "pb_flag": false,
     "source": "5",
-    "date": "10-23",
     "pb_over_history": 0.3261,
-    "pe_over_history": 0.2236
+    "pe_over_history": 0.2236,
+    "date": "10-23"
    }
   ],
   "current_page": 1,
