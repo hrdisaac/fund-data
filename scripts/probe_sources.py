@@ -1,134 +1,110 @@
 #!/usr/bin/env python3
 """
-One-off probe: which historical valuation data sources can the GitHub relay read?
-Run it once from GitHub Actions (workflow "Probe data sources") and paste the log into the chat.
-It only reads; it writes nothing to the repository.
+Probe 2: settle the details the first probe cut off. Read-only; writes nothing.
+Run "Probe data sources" from the Actions tab and paste the whole log into the chat.
 """
 import json
-import re
 import urllib.error
 import urllib.request
 from datetime import datetime, timedelta, timezone
 
 BJ = timezone(timedelta(hours=8))
-TODAY = datetime.now(BJ).strftime("%Y%m%d")
-UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-      "(KHTML, like Gecko) Chrome/124.0 Safari/537.36")
-
-CANDIDATES = [
-    ("CSI 指数日行情 JSON（看有没有 PE 字段）",
-     "https://www.csindex.com.cn/csindex-home/perf/index-perf?indexCode=000300&startDate=20160101&endDate=" + TODAY,
-     {"Referer": "https://www.csindex.com.cn/", "Accept": "application/json"}),
-    ("CSI 指数基本信息（当前 PE/股息率）",
-     "https://www.csindex.com.cn/csindex-home/indexInfo/index-basic-info?indexCode=000300",
-     {"Referer": "https://www.csindex.com.cn/", "Accept": "application/json"}),
-    ("CSI 估值文件 indicator.xls（历史 PE1/PE2/股息率）",
-     "https://csi-web-dev.oss-cn-shanghai-finance-1-pub.aliyuncs.com/static/html/csindex/public/uploads/file/autofile/indicator/000300indicator.xls",
-     {}),
-    ("CSI 估值文件（光伏产业 931151）",
-     "https://csi-web-dev.oss-cn-shanghai-finance-1-pub.aliyuncs.com/static/html/csindex/public/uploads/file/autofile/indicator/931151indicator.xls",
-     {}),
-    ("蛋卷 指数 PE 历史（沪深300）",
-     "https://danjuanfunds.com/djapi/index_eva/pe_history/SH000300?day=all",
-     {"Referer": "https://danjuanfunds.com/djmodule/value-center", "Accept": "application/json"}),
-    ("蛋卷 指数 PB 历史（沪深300）",
-     "https://danjuanfunds.com/djapi/index_eva/pb_history/SH000300?day=all",
-     {"Referer": "https://danjuanfunds.com/djmodule/value-center", "Accept": "application/json"}),
-    ("蛋卷 指数详情（中证800）",
-     "https://danjuanfunds.com/djapi/index_eva/detail/SH000906",
-     {"Referer": "https://danjuanfunds.com/djmodule/value-center", "Accept": "application/json"}),
-    ("东财数据中心 行业估值（中证行业市盈率）",
-     "https://datacenter-web.eastmoney.com/api/data/v1/get?reportName=RPT_VALUEINDUSTRY_DET&columns=ALL&pageSize=5&sortColumns=TRADE_DATE&sortTypes=-1",
-     {"Referer": "https://data.eastmoney.com/"}),
-    ("东财数据中心 市场估值（沪深两市整体 PE）",
-     "https://datacenter-web.eastmoney.com/api/data/v1/get?reportName=RPT_VALUEMARKET&columns=ALL&pageSize=5&sortColumns=TRADE_DATE&sortTypes=-1",
-     {"Referer": "https://data.eastmoney.com/"}),
-    ("东财 国债收益率（10 年期历史）",
-     "https://datacenter.eastmoney.com/api/data/get?type=RPTA_WEB_TREASURYYIELD&sty=ALL&st=SOLAR_DATE&sr=-1&p=1&ps=5",
-     {"Referer": "https://data.eastmoney.com/"}),
-    ("东财 融资融券 历史汇总（杠杆率用）",
-     "https://datacenter-web.eastmoney.com/api/data/v1/get?reportName=RPT_RZRQ_LSHJ&columns=ALL&pageSize=5&sortColumns=DIM_DATE&sortTypes=-1",
-     {"Referer": "https://data.eastmoney.com/"}),
-    ("东财 持仓明细页（服务器端能否读到）",
-     "https://fundf10.eastmoney.com/FundArchivesDatas.aspx?type=jjcc&code=001407&topline=10&year=&month=",
-     {"Referer": "https://fundf10.eastmoney.com/ccmx_001407.html"}),
-]
+NOW = datetime.now(BJ)
+TODAY = NOW.strftime("%Y%m%d")
+RECENT = (NOW - timedelta(days=12)).strftime("%Y%m%d")
+UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+CSI = {"Referer": "https://www.csindex.com.cn/", "Accept": "application/json"}
+EM = {"Referer": "https://data.eastmoney.com/"}
+DJ = {"Referer": "https://danjuanfunds.com/djmodule/value-center", "Accept": "application/json"}
 
 
-def fetch(url, extra):
-    headers = {"User-Agent": UA, "Accept-Language": "zh-CN,zh;q=0.9"}
-    headers.update(extra)
-    req = urllib.request.Request(url, headers=headers)
-    with urllib.request.urlopen(req, timeout=40) as r:
-        return r.status, r.headers.get("Content-Type", ""), r.read()
+def get(url, extra):
+    h = {"User-Agent": UA, "Accept-Language": "zh-CN,zh;q=0.9"}
+    h.update(extra)
+    with urllib.request.urlopen(urllib.request.Request(url, headers=h), timeout=40) as r:
+        return json.loads(r.read().decode("utf-8", errors="replace"))
 
 
-def describe_json(body):
+def section(title):
+    print("=" * 100)
+    print(title)
+
+
+def safe(fn):
     try:
-        j = json.loads(body.decode("utf-8", errors="replace"))
-    except Exception:
-        return None
-    out = []
-
-    def walk(obj, depth=0):
-        if depth > 3:
-            return
-        if isinstance(obj, dict):
-            out.append("  " * depth + f"dict keys: {list(obj.keys())[:15]}")
-            for k in list(obj.keys())[:4]:
-                if isinstance(obj[k], (dict, list)):
-                    out.append("  " * depth + f"[{k}]")
-                    walk(obj[k], depth + 1)
-        elif isinstance(obj, list):
-            out.append("  " * depth + f"list of {len(obj)}; first: {json.dumps(obj[0], ensure_ascii=False)[:300] if obj else '[]'}")
-            if obj and len(obj) > 1:
-                out.append("  " * depth + f"last: {json.dumps(obj[-1], ensure_ascii=False)[:200]}")
-    walk(j)
-    return "\n".join(out)
-
-
-def describe_xls(body):
-    try:
-        import xlrd  # installed by the workflow
-    except ImportError:
-        return "xlrd not installed; raw size only"
-    try:
-        book = xlrd.open_workbook(file_contents=body)
-        sh = book.sheet_by_index(0)
-        head = [str(c.value) for c in sh.row(0)]
-        first = [str(c.value) for c in sh.row(1)] if sh.nrows > 1 else []
-        last = [str(c.value) for c in sh.row(sh.nrows - 1)] if sh.nrows > 2 else []
-        return f"rows {sh.nrows}; columns {head}; first {first}; last {last}"
+        fn()
+    except urllib.error.HTTPError as e:
+        print(f"  ❌ HTTP {e.code}")
     except Exception as e:
-        return f"not a readable xls: {e}"
+        print(f"  ❌ {type(e).__name__}: {e}")
+
+
+def csi_recent(code):
+    def run():
+        j = get(f"https://www.csindex.com.cn/csindex-home/perf/index-perf?indexCode={code}&startDate={RECENT}&endDate={TODAY}", CSI)
+        rows = j.get("data") or []
+        print(f"  {len(rows)} rows")
+        if rows:
+            print(f"  ALL FIELDS: {list(rows[-1].keys())}")
+            print(f"  latest row: {json.dumps(rows[-1], ensure_ascii=False)[:900]}")
+    return run
+
+
+def csi_history_depth():
+    j = get(f"https://www.csindex.com.cn/csindex-home/perf/index-perf?indexCode=000906&startDate=20160101&endDate={TODAY}", CSI)
+    rows = j.get("data") or []
+    keys = [k for k in (rows[-1].keys() if rows else []) if "pe" in k.lower() or "pb" in k.lower() or "yield" in k.lower() or "div" in k.lower()]
+    print(f"  {len(rows)} rows for 中证800; valuation-like fields: {keys}")
+    for k in keys:
+        vals = [r for r in rows if r.get(k) not in (None, "", 0)]
+        print(f"  field {k}: {len(vals)} non-empty; first {vals[0]['tradeDate'] if vals else '--'} = {vals[0].get(k) if vals else '--'}; "
+              f"latest {vals[-1]['tradeDate'] if vals else '--'} = {vals[-1].get(k) if vals else '--'}")
+
+
+def em_report(name, extra_qs="", n=3):
+    def run():
+        j = get(f"https://datacenter-web.eastmoney.com/api/data/v1/get?reportName={name}&columns=ALL&pageSize={n}{extra_qs}", EM)
+        res = j.get("result")
+        if not res:
+            print(f"  ⚠ {j.get('message')}")
+            return
+        data = res.get("data") or []
+        print(f"  pages {res.get('pages')}, count {res.get('count')}")
+        if data:
+            print(f"  ALL FIELDS: {list(data[0].keys())}")
+            for row in data[:n]:
+                print(f"  row: {json.dumps(row, ensure_ascii=False)[:700]}")
+    return run
+
+
+def dj_hist(code):
+    def run():
+        j = get(f"https://danjuanfunds.com/djapi/index_eva/pe_history/{code}?day=all", DJ)
+        pts = ((j.get("data") or {}).get("index_eva_pe_growths")) or []
+        print(f"  {len(pts)} PE points" + (f"; first {pts[0]}; last {pts[-1]}" if pts else " (none)"))
+    return run
 
 
 def main():
-    print(f"Probe run at {datetime.now(BJ).strftime('%Y-%m-%d %H:%M')} Beijing\n")
-    for name, url, extra in CANDIDATES:
-        print("=" * 100)
-        print(name)
-        print(url)
-        try:
-            status, ctype, body = fetch(url, extra)
-        except urllib.error.HTTPError as e:
-            print(f"  ❌ HTTP {e.code}")
-            continue
-        except Exception as e:
-            print(f"  ❌ {type(e).__name__}: {e}")
-            continue
-        print(f"  HTTP {status}, {ctype}, {len(body)} bytes")
-        text_head = body[:160].decode("utf-8", errors="replace").replace("\n", " ")
-        print(f"  starts with: {text_head!r}")
-        if url.endswith(".xls"):
-            print("  " + describe_xls(body))
-        else:
-            d = describe_json(body)
-            if d:
-                print(d)
-            elif b"var apidata" in body[:50]:
-                m = re.search(rb"content:\"(.{0,200})", body)
-                print(f"  holdings page readable server-side; content starts: {m.group(1)[:200] if m else b''!r}")
+    print(f"Probe 2 at {NOW.strftime('%Y-%m-%d %H:%M')} Beijing\n")
+    for code, name in [("000906", "中证800"), ("931151", "光伏产业"), ("932000", "中证2000"), ("000510", "中证A500"),
+                       ("399976", "CS新能车"), ("H30269", "红利低波"), ("930713", "人工智能")]:
+        section(f"CSI daily data, last 12 days: {name} {code}")
+        safe(csi_recent(code))
+    section("CSI daily data: how far back do valuation fields go (中证800, from 2016)?")
+    safe(csi_history_depth)
+    section("Eastmoney market valuation RPT_VALUEMARKET (all fields, latest rows)")
+    safe(em_report("RPT_VALUEMARKET", "&sortColumns=TRADE_DATE&sortTypes=-1", n=8))
+    section("Eastmoney industry valuation: one industry's history depth (earliest rows)")
+    safe(em_report("RPT_VALUEINDUSTRY_DET", '&sortColumns=TRADE_DATE&sortTypes=1&filter=(BOARD_CODE%3D%22016058%22)', n=2))
+    section("Eastmoney industry valuation: list of industries on the latest day")
+    safe(em_report("RPT_VALUEINDUSTRY_DET", '&sortColumns=TRADE_DATE&sortTypes=-1&pageSize=1', n=1))
+    for rpt in ["RPTA_WEB_MARGIN_DAILYTRADE", "RPTA_RZRQ_LSHJ", "RPT_MARGIN_TRADING_MARKET", "RPTA_WEB_RZRQ_LSSH"]:
+        section(f"Margin trading report candidate: {rpt}")
+        safe(em_report(rpt, "", n=2))
+    for code in ["SZ399006", "CSIH30269", "HKHSTECH", "SH000906"]:
+        section(f"蛋卷 PE history: {code}")
+        safe(dj_hist(code))
     print("=" * 100)
     print("Done. Please paste this whole log into the chat.")
 
