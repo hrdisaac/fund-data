@@ -1,6 +1,6 @@
 # Daily job for the fund viewer's data relay:
-#   1) 蛋卷基金 index valuation table   → data/index_valuation.json
-#   2) fund / ETF holdings with weights  → data/holdings.json   (codes listed in funds.txt)
+#   1) 蛋卷基金 index valuation table   → data/index_valuation.json   (saved straight away)
+#   2) fund / ETF holdings with weights  → data/holdings.json          (codes listed in funds.txt)
 # File location:  .github/workflows/fetch-valuation.yml
 name: Fetch index valuation
 
@@ -30,21 +30,26 @@ jobs:
           python-version: '3.12'
 
       - name: Fetch and check the valuation data
+        timeout-minutes: 5
         run: python scripts/fetch_valuation.py
 
-      - name: Fetch fund holdings (codes from funds.txt)
-        if: always()                      # holdings still run if the valuation step failed
-        run: python scripts/fetch_holdings.py
-
-      - name: Save the data if it changed
+      - name: Save the valuation data
         if: always()
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add data/
-          if git diff --cached --quiet; then
-            echo "No changes to save."
-          else
-            git commit -m "Update data $(date -u +%F)"
-            git push
-          fi
+          git add data/index_valuation.json data/index_valuation_raw.json 2>/dev/null || true
+          if git diff --cached --quiet; then echo "No valuation changes to save."; else
+            git commit -m "Update index valuation $(date -u +%F)" && git push; fi
+
+      - name: Fetch fund holdings (codes from funds.txt)
+        if: always()
+        timeout-minutes: 15                # the script itself stops starting new codes after 12 minutes
+        run: python scripts/fetch_holdings.py
+
+      - name: Save the holdings data
+        if: always()
+        run: |
+          git add data/holdings.json 2>/dev/null || true
+          if git diff --cached --quiet; then echo "No holdings changes to save."; else
+            git commit -m "Update holdings $(date -u +%F)" && git pull --rebase --quiet && git push; fi
