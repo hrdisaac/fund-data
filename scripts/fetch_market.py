@@ -53,6 +53,7 @@ IND_MIN_YEARS = 3.0                  # a board needs 3 years of history before i
 UNDER, OVER = 30.0, 70.0             # percentile thresholds (our stated rule)
 TIME_BUDGET = float(os.environ.get("MARKET_TIME_BUDGET", 11 * 60))
 PAUSE = float(os.environ.get("MARKET_PAUSE", 0.8))
+BACKFILL_PAGE_SIZES = (5000, 500)    # try one big page per board; fall back if the source caps it
 MAX_CONSECUTIVE_FAILURES = 6
 
 CSI_URL = ("https://www.csindex.com.cn/csindex-home/perf/index-perf"
@@ -258,12 +259,14 @@ def csi_item(code, name, full, rows):
     if not pe_rows:
         raise RuntimeError("no PE values (the index may not be published by CSI, or has no PE)")
     last_d, last_pe = pe_rows[-1]
-    first_d = pe_rows[0][0]
     latest = d_of(last_d)
-    years = round((latest - d_of(first_d)).days / 365.25, 1)
     w10 = years_before(latest, YEARS).isoformat()
     w5 = years_before(latest, 5).isoformat()
     in10 = [(d, pe) for d, pe in pe_rows if d > w10]
+    # Coverage is measured inside the window: CSI sometimes has an isolated PE value before a
+    # multi-year gap (seen for 990001: one value in 2016, then nothing until 2020-02-27).
+    first_d = in10[0][0]
+    years = round((latest - d_of(first_d)).days / 365.25, 1)
     v10 = sorted(pe for _, pe in in10)
     v5 = sorted(pe for d, pe in pe_rows if d > w5)
     close = next((c for d, c, _ in reversed(rows) if d == last_d), None)
@@ -499,42 +502,59 @@ def update_industries(hist, boards):
     # b) backfill: whole history of each board not yet backfilled, while time allows
     todo = [c for c in sorted(boards) if not boards[c].get("backfilled")]
     done_now, failures = 0, 0
+    sizes = list(BACKFILL_PAGE_SIZES)
     for code in todo:
         if time_left() < 60 or failures >= MAX_CONSECUTIVE_FAILURES:
             break
-        flt = "&filter=" + urllib.parse.quote(f'(BOARD_CODE="{code}")')
-        try:
-            got, page, pages, seen, expected = {}, 1, 1, set(), None
-            while page <= min(pages, 20):
-                rows, pages, cnt = ind_rows(1, page, flt=flt, want_count=True)
-                expected = expected if expected is not None else cnt
-                if not rows:
-                    break
-                if rows[0][:3] in seen:
-                    raise RuntimeError("paging parameter ignored (same page twice)")
-                seen.add(rows[0][:3])
-                if any(r[0] != code for r in rows):
-                    raise RuntimeError("board filter ignored by the source")
-                for _, _, d, pe, pb, _, _ in rows:
-                    got[d] = (pe, pb)
-                page += 1
-                pause()
-            if not got:
-                raise RuntimeError("no rows")
-            if expected and len(got) < 0.98 * expected:
-                raise RuntimeError(f"incomplete: {len(got)} of {expected} rows (page size capped by the source?)")
-            hist[code].update(got)
-            touched.update(d[:7] for d in got)
-            boards[code]["backfilled"] = max(got)
-            done_now += 1
-            failures = 0
-            log(f"  backfilled {code} {boards[code]['name']}: {len(got)} days from {min(got)}")
-        except Exception as e:
+        while True:
+            try:
+                got = backfill_board(code, sizes[0])
+                break
+            except Exception as e:
+                if len(sizes) > 1:          # big pages refused or capped: use the small size from now on
+                    log(f"  page size {sizes[0]} not usable ({type(e).__name__}: {e}); using {sizes[1]}")
+                    sizes.pop(0)
+                    continue
+                got = e
+                break
+        if isinstance(got, Exception):
             failures += 1
-            log(f"  backfill {code} failed: {type(e).__name__}: {e}")
+            log(f"  backfill {code} failed: {type(got).__name__}: {got}")
+            continue
+        hist[code].update(got)
+        touched.update(d[:7] for d in got)
+        boards[code]["backfilled"] = max(got)
+        done_now += 1
+        failures = 0
+        log(f"  backfilled {code} {boards[code]['name']}: {len(got)} days from {min(got)}")
     remaining = sum(1 for c in boards if not boards[c].get("backfilled"))
-    log(f"Industries: backfilled {done_now} boards this run; {remaining} still to do")
+    log(f"Industries: backfilled {done_now} boards this run (page size {sizes[0]}); {remaining} still to do")
     return touched, latest_info, newest, remaining
+
+
+def backfill_board(code, size):
+    """Whole history of one board, verified complete against the source's row count."""
+    flt = "&filter=" + urllib.parse.quote(f'(BOARD_CODE="{code}")')
+    got, page, pages, seen, expected = {}, 1, 1, set(), None
+    while page <= min(pages, 20):
+        rows, pages, cnt = ind_rows(1, page, size=size, flt=flt, want_count=True)
+        expected = expected if expected is not None else cnt
+        if not rows:
+            break
+        if rows[0][:3] in seen:
+            raise RuntimeError("paging parameter ignored (same page twice)")
+        seen.add(rows[0][:3])
+        if any(r[0] != code for r in rows):
+            raise RuntimeError("board filter ignored by the source")
+        for _, _, d, pe, pb, _, _ in rows:
+            got[d] = (pe, pb)
+        page += 1
+        pause()
+    if not got:
+        raise RuntimeError("no rows")
+    if expected and len(got) < 0.98 * expected:
+        raise RuntimeError(f"incomplete: {len(got)} of {expected} rows (page size capped by the source?)")
+    return got
 
 
 def industry_block(hist, boards, latest_info, newest, closes):
@@ -579,14 +599,16 @@ def industry_block(hist, boards, latest_info, newest, closes):
                 latest_rows.append({"code": code, "name": boards[code]["name"], "pe": pe, "pb": pb,
                                     "pe_pct": pe_pct, "pb_pct": pb_pct, "under": under, "over": over,
                                     "num": n, "loss": loss, "years": round((cur - first).days / 365.25, 1)})
-    days = sorted(d for d, f in flags_by_day.items() if f[1] >= 10)
     if not latest_rows or newest not in flags_by_day:
         raise RuntimeError("no board has enough history for the newest day yet")
+    # days on which enough boards were eligible to make a count meaningful (10, or all if fewer exist)
+    min_boards = max(1, min(10, flags_by_day[newest][1]))
+    days = sorted(d for d, f in flags_by_day.items() if f[1] >= min_boards)
     count, total = flags_by_day[newest]
     shares = sorted(flags_by_day[d][0] / flags_by_day[d][1] for d in days)
     share = count / total
     count_pct = pct_below(shares, share)
-    verdict = "偏多" if count_pct >= 70 else "偏少" if count_pct <= 30 else "适中"
+    verdict = "" if count_pct is None else "偏多" if count_pct >= 70 else "偏少" if count_pct <= 30 else "适中"
     cdates = sorted(closes)
     def close_on(d):
         i = bisect.bisect_right(cdates, d) - 1
