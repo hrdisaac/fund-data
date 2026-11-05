@@ -11,6 +11,7 @@ funds.txt: one code per line (or comma/space separated); '#' starts a comment.
 
 Local test without network:  python fetch_holdings.py --from-dir samples/   (samples/<code>.txt = raw page bodies)
 """
+import concurrent.futures
 import html.parser
 import json
 import os
@@ -28,7 +29,11 @@ BJ = timezone(timedelta(hours=8))
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/124.0 Safari/537.36")
 MAX_CODES = 400
-PAUSE_SECONDS = 1.5
+PAUSE_SECONDS = 1.5            # per worker, between requests
+WORKERS = 2                    # two codes at a time
+REQUEST_TIMEOUT = 15           # seconds per request
+TIME_BUDGET = float(os.environ.get("HOLDINGS_TIME_BUDGET", 12 * 60))   # stop starting new codes after this
+MAX_CONSECUTIVE_FAILURES = 8   # source seems to be refusing us: stop and keep previous answers
 
 
 def log(msg):
@@ -55,7 +60,7 @@ def fetch_page(code, year=""):
     req = urllib.request.Request(url, headers={
         "User-Agent": UA, "Referer": f"https://fundf10.eastmoney.com/ccmx_{code}.html",
         "Accept": "*/*", "Accept-Language": "zh-CN,zh;q=0.9"})
-    with urllib.request.urlopen(req, timeout=40) as r:
+    with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as r:
         return r.read().decode("utf-8", errors="replace")
 
 
@@ -180,7 +185,9 @@ def fetch_holdings(code, loader):
     parsed = parse_holdings(content)
     if (parsed is None or not parsed["stocks"]) and years:
         cur = cur or datetime.now(BJ).year
-        prev = max([y for y in years if y < cur], default=None)
+        # only the previous year (early in the year this year's reports are not out yet);
+        # never older: a fund with no stock holdings since then (e.g. an ETF feeder) has none now
+        prev = cur - 1 if (cur - 1) in years else None
         if prev:
             content2, _, _ = split_apidata(loader(code, str(prev)))
             parsed2 = parse_holdings(content2 or "")
@@ -212,21 +219,44 @@ def main():
 
     funds, errors = {}, {}
     now = datetime.now(BJ).strftime("%Y-%m-%d %H:%M:%S")
-    for i, code in enumerate(codes):
+    started = time.monotonic()
+    state = {"consecutive": 0, "stop": None}
+
+    def work(code):
+        if state["stop"]:
+            return code, None, state["stop"]
+        if time.monotonic() - started > TIME_BUDGET:
+            state["stop"] = f"time budget of {TIME_BUDGET:.0f}s used up"
+            return code, None, state["stop"]
         try:
             h = fetch_holdings(code, loader)
-            funds[code] = {"report_date": h["report_date"], "period": h["period"], "stocks": h["stocks"],
-                           "full": len(h["stocks"]) > 10, "fetched_at": now}
-            log(f"{code}: {len(h['stocks'])} stocks, {h['period'] or 'no period'}, as of {h['report_date'] or '--'}")
+            state["consecutive"] = 0
+            return code, h, None
         except Exception as e:
-            errors[code] = f"{type(e).__name__}: {e}"
-            log(f"{code}: FAILED {errors[code]}")
-            if code in previous:
-                funds[code] = previous[code]   # keep the last good answer
-        if not sample_dir and i < len(codes) - 1:
-            time.sleep(PAUSE_SECONDS)
+            state["consecutive"] += 1
+            if state["consecutive"] >= MAX_CONSECUTIVE_FAILURES:
+                state["stop"] = f"{MAX_CONSECUTIVE_FAILURES} failures in a row (source refusing or very slow)"
+            return code, None, f"{type(e).__name__}: {e}"
+        finally:
+            if not sample_dir:
+                time.sleep(PAUSE_SECONDS)
 
-    if errors and len(errors) == len(codes):
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1 if sample_dir else WORKERS) as pool:
+        for code, h, err in pool.map(work, codes):
+            if h is not None:
+                total = sum(s[3] for s in h["stocks"])
+                funds[code] = {"report_date": h["report_date"], "period": h["period"], "stocks": h["stocks"],
+                               "full": len(h["stocks"]) > 10, "coverage": round(total, 2), "fetched_at": now}
+                log(f"{code}: {len(h['stocks'])} stocks ({total:.1f}% of NAV), {h['period'] or 'no period'}, as of {h['report_date'] or '--'}")
+            else:
+                errors[code] = err
+                log(f"{code}: {'SKIPPED' if err == state['stop'] else 'FAILED'} {err}"
+                    + ("; keeping previous answer" if code in previous else ""))
+                if code in previous:
+                    funds[code] = previous[code]   # keep the last good answer
+    log(f"Holdings step took {time.monotonic() - started:.0f}s")
+
+    if errors and len(errors) == len(codes) and not funds:
         log("Every fetch failed; keeping the previous file.")
         sys.exit(1)
 
