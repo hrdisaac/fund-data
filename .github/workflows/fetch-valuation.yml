@@ -1,6 +1,8 @@
 # Daily job for the fund viewer's data relay:
 #   1) 蛋卷基金 index valuation table   → data/index_valuation.json   (saved straight away)
 #   2) fund / ETF holdings with weights  → data/holdings.json          (codes listed in funds.txt)
+#   3) market indicators                 → data/csi_valuation.json, data/market.json, data/history/
+#      (CSI index PE for the codes in indices.txt; 股债性价比; 低估行业个数)
 # File location:  .github/workflows/fetch-valuation.yml
 name: Fetch index valuation
 
@@ -21,7 +23,7 @@ concurrency:
 jobs:
   fetch:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
@@ -38,7 +40,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add data/index_valuation.json data/index_valuation_raw.json 2>/dev/null || true
+          for f in data/index_valuation.json data/index_valuation_raw.json; do if [ -e "$f" ]; then git add "$f"; fi; done
           if git diff --cached --quiet; then echo "No valuation changes to save."; else
             git commit -m "Update index valuation $(date -u +%F)" && git push; fi
 
@@ -50,6 +52,18 @@ jobs:
       - name: Save the holdings data
         if: always()
         run: |
-          git add data/holdings.json 2>/dev/null || true
+          if [ -e data/holdings.json ]; then git add data/holdings.json; fi
           if git diff --cached --quiet; then echo "No holdings changes to save."; else
             git commit -m "Update holdings $(date -u +%F)" && git pull --rebase --quiet && git push; fi
+
+      - name: Fetch market indicators (CSI PE, 股债性价比, 低估行业)
+        if: always()
+        timeout-minutes: 15                # the script itself stops starting new work after 11 minutes
+        run: python scripts/fetch_market.py
+
+      - name: Save the market data
+        if: always()
+        run: |
+          for f in data/csi_valuation.json data/market.json data/history; do if [ -e "$f" ]; then git add "$f"; fi; done
+          if git diff --cached --quiet; then echo "No market changes to save."; else
+            git commit -m "Update market indicators $(date -u +%F)" && git pull --rebase --quiet && git push; fi
