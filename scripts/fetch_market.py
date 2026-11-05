@@ -51,7 +51,11 @@ BJ = timezone(timedelta(hours=8))
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/124.0 Safari/537.36")
 
-ERP_INDEX = "000906"                 # 中证800
+ERP_INDEX = "000906"                 # 中证800 (the default, published as "erp")
+ERP_OTHERS = [("000300", "沪深300"), ("000905", "中证500"), ("000852", "中证1000"), ("000985", "中证全指")]
+ERP_HISTORY_YEARS = 20               # requested history for ERP indices (CSI returns what it has)
+ERP_MIN_WINDOW_YEARS = 3             # a past day gets a temperature only with ≥3 years of history before it
+FWD_DAYS = 365                       # "then one year": first trading day ≥ 365 calendar days later
 MAX_INDICES = 80
 YEARS = 10
 MIN_YEARS_FOR_PCT = 1.0              # shorter history: no percentile at all
@@ -246,8 +250,21 @@ def read_index_codes(path):
     return codes[:MAX_INDICES]
 
 
-def fetch_csi(code, today):
-    start = years_before(today, YEARS) - timedelta(days=20)
+_CSI_CACHE = {}
+
+
+def fetch_csi(code, today, years=YEARS):
+    """One request per index; a longer history fetched earlier in the run is reused."""
+    hit = _CSI_CACHE.get(code)
+    if hit and hit[0] >= years:
+        return hit[1]
+    res = _fetch_csi(code, today, years)
+    _CSI_CACHE[code] = (years, res)
+    return res
+
+
+def _fetch_csi(code, today, years):
+    start = years_before(today, years) - timedelta(days=20)
     url = CSI_URL.format(code=code, start=start.strftime("%Y%m%d"), end=today.strftime("%Y%m%d"))
     j = get_json(url, CSI_HEADERS)
     rows = j.get("data") if isinstance(j, dict) else None
@@ -374,8 +391,27 @@ def fetch_treasury(since):
     raise last_err
 
 
-def erp_block(csi_rows, y10):
-    """csi_rows: [(date, close, pe)] for 中证800. Returns the published block."""
+def temp_band(temp):
+    return ("极低温" if temp < 10 else "较低温" if temp < 30 else "适中" if temp < 70
+            else "较高温" if temp < 90 else "极高温")
+
+
+BANDS = ["极低温", "较低温", "适中", "较高温", "极高温"]
+
+
+def fwd_stats(vals):
+    if not vals:
+        return None
+    v = sorted(vals)
+    return {"n": len(v), "median": round(100 * quantile(v, 0.5), 2), "mean": round(100 * sum(v) / len(v), 2),
+            "up": round(100 * sum(1 for x in v if x > 0) / len(v), 1),
+            "p25": round(100 * quantile(v, 0.25), 2), "p75": round(100 * quantile(v, 0.75), 2),
+            "min": round(100 * v[0], 2), "max": round(100 * v[-1], 2)}
+
+
+def erp_block(csi_rows, y10, code=ERP_INDEX, name="中证800"):
+    """csi_rows: [(date, close, pe)]. Returns the published block (latest values, levels, weekly series,
+    and the 'same temperature band → return over the next year' statistic)."""
     ydates = sorted(y10)
     series = []
     for d, close, pe in csi_rows:
@@ -396,34 +432,83 @@ def erp_block(csi_rows, y10):
     v5 = sorted(s[4] for s in series if s[0] > w5)
     pct10 = pct_below(v10, erp)
     temp = round(100 - pct10)
-    band = ("极低温" if temp < 10 else "较低温" if temp < 30 else "适中" if temp < 70
-            else "较高温" if temp < 90 else "极高温")
     q = lambda p: round(quantile(v10, p), 3)
+    # temperature of every past day, from the 10 years up to that day only (no look-ahead)
+    first = d_of(series[0][0])
+    win, dq, temps = [], collections.deque(), {}
+    for sd, _, _, _, e in series:
+        cur = d_of(sd)
+        start = years_before(cur, YEARS).isoformat()
+        while dq and dq[0][0] <= start:
+            del win[bisect.bisect_left(win, dq.popleft()[1])]
+        dq.append((sd, e))
+        bisect.insort(win, e)
+        if (cur - first).days / 365.25 >= ERP_MIN_WINDOW_YEARS:
+            temps[sd] = round(100 - pct_below(win, e))
+    # the price change over the next year, grouped by the band on the starting day
+    cdates = [s[0] for s in series if s[1]]
+    closes = {s[0]: s[1] for s in series if s[1]}
+    by_band, everything, starts = collections.defaultdict(list), [], collections.defaultdict(list)
+    for sd, t in temps.items():
+        target = (d_of(sd) + timedelta(days=FWD_DAYS)).isoformat()
+        j = bisect.bisect_left(cdates, target)
+        if j >= len(cdates) or sd not in closes or (d_of(cdates[j]) - d_of(target)).days > 10:
+            continue
+        r = closes[cdates[j]] / closes[sd] - 1
+        b = temp_band(t)
+        by_band[b].append(r)
+        starts[b].append(sd)
+        everything.append(r)
+    used = sorted(x for b in starts for x in starts[b])
+    forward = None
+    if everything:
+        forward = {"horizon_days": FWD_DAYS, "from": used[0], "to": used[-1], "temps_from": min(temps),
+                   "all": fwd_stats(everything),
+                   "bands": [dict(fwd_stats(by_band[b]) or {"n": 0}, band=b,
+                                  years=len({x[:4] for x in starts[b]}),
+                                  first=min(starts[b]) if starts[b] else None, last=max(starts[b]) if starts[b] else None)
+                             for b in BANDS]}
     return {
-        "index": ERP_INDEX, "index_name": "中证800", "date": d, "pe": round(pe, 2), "y10": round(y, 4),
+        "index": code, "index_name": name, "date": d, "pe": round(pe, 2), "y10": round(y, 4),
         "y10_date": ydates[bisect.bisect_right(ydates, d) - 1],
         "erp": round(erp, 3), "ratio": round((100.0 / pe) / y, 3),
-        "pct10y": pct10, "pct5y": pct_below(v5, erp), "temperature": temp, "band": band,
-        "window_from": next(s[0] for s in series if s[0] > w10), "n": len(v10),
+        "pct10y": pct10, "pct5y": pct_below(v5, erp), "temperature": temp, "band": temp_band(temp),
+        "window_from": next(s[0] for s in series if s[0] > w10), "n": len(v10), "history_from": series[0][0],
         # ERP values at these percentiles of the window: temperature 90 / 70 / 50 / 30 / 10
         "levels": {"p10": q(0.1), "p30": q(0.3), "p50": q(0.5), "p70": q(0.7), "p90": q(0.9)},
+        "forward": forward,
         "series": [[int(s[0].replace("-", "")), round(s[4], 3), s[1]] for s in weekly([s for s in series if s[0] > w10])],
     }
 
 
-def run_erp(csi_raw, today):
-    rows = csi_raw.get(ERP_INDEX)
-    if not rows:
-        raise RuntimeError(f"no CSI data for {ERP_INDEX} this run")
-    since = (years_before(today, YEARS) - timedelta(days=30)).isoformat()
+def run_erp(today):
+    """Default block (中证800) plus the other indices; each index is independent."""
+    since = (years_before(today, ERP_HISTORY_YEARS) - timedelta(days=30)).isoformat()
     y10 = fetch_treasury(since)
-    log(f"ERP: {len(y10)} bond-yield days, latest {max(y10)} = {y10[max(y10)]}")
-    b = erp_block(rows, y10)
-    if (d_of(b["date"]) - d_of(b["y10_date"])).days > 5:
-        raise RuntimeError(f"bond yield is stale ({b['y10_date']} vs PE {b['date']})")
-    log(f"ERP: {b['date']} PE {b['pe']} → E/P {100 / b['pe']:.2f}% − 10y {b['y10']}% = {b['erp']}%, "
-        f"{b['pct10y']}% percentile (10y), temperature {b['temperature']} ({b['band']})")
-    return b
+    log(f"ERP: {len(y10)} bond-yield days from {min(y10)}, latest {max(y10)} = {y10[max(y10)]}")
+    blocks, errors = {}, {}
+    for code, name in [(ERP_INDEX, "中证800")] + ERP_OTHERS:
+        try:
+            _, _, rows, _ = fetch_csi(code, today, ERP_HISTORY_YEARS)
+            pause()
+            if not rows:
+                raise RuntimeError("no CSI data")
+            b = erp_block(rows, y10, code, name)
+            if (d_of(b["date"]) - d_of(b["y10_date"])).days > 5:
+                raise RuntimeError(f"bond yield is stale ({b['y10_date']} vs PE {b['date']})")
+            blocks[code] = b
+            f = b["forward"]
+            cur = next((x for x in f["bands"] if x["band"] == b["band"]), None) if f else None
+            log(f"ERP {name}: {b['date']} PE {b['pe']} → E/P {100 / b['pe']:.2f}% − 10y {b['y10']}% = {b['erp']}%, "
+                f"{b['pct10y']}% percentile (10y), temperature {b['temperature']} ({b['band']}); history from {b['history_from']}"
+                + (f"; next-year stats {f['from']}…{f['to']}, current band n={cur['n']} median {cur.get('median')}% "
+                   f"up {cur.get('up')}% vs all median {f['all']['median']}%" if cur else "; no next-year stats yet"))
+        except Exception as e:
+            errors[code] = f"{type(e).__name__}: {e}"[:200]
+            log(f"ERP {name} ({code}) failed: {errors[code]}")
+    if ERP_INDEX not in blocks:
+        raise RuntimeError(errors.get(ERP_INDEX, "中证800 failed"))
+    return blocks, errors
 
 
 # ---------------------------------------------------------------- 4) fear and greed
@@ -827,6 +912,7 @@ def main():
         CSI_OUT = os.path.join(DATA_DIR, "csi_valuation.json")
         MARKET_OUT = os.path.join(DATA_DIR, "market.json")
         IND_DIR = os.path.join(DATA_DIR, "history", "industry")
+    _CSI_CACHE.clear()                                       # the cache is per run
     now = datetime.now(BJ)
     if os.environ.get("MARKET_TODAY"):                      # tests: pretend it is another day
         now = datetime.fromisoformat(os.environ["MARKET_TODAY"]).replace(tzinfo=BJ)
@@ -846,11 +932,16 @@ def main():
         log(f"CSI step failed: {type(e).__name__}: {e}")
 
     try:
-        market["erp"] = run_erp(csi_raw, today)
+        blocks, erp_errors = run_erp(today)
+        market["erp"] = blocks[ERP_INDEX]
+        market["erp_others"] = [blocks[c] for c, _ in ERP_OTHERS if c in blocks]
+        if erp_errors:
+            market["erp_others_errors"] = erp_errors
         ok_any = True
     except Exception as e:
         log(f"ERP failed: {type(e).__name__}: {e}")
         market["erp"] = previous.get("erp")
+        market["erp_others"] = previous.get("erp_others", [])
         market["erp_error"] = f"{type(e).__name__}: {e}"[:200]
 
     try:
