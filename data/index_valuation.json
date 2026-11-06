@@ -1,8 +1,8 @@
 {
  "source": "蛋卷基金 index_eva (data from Wind) — personal use",
  "source_url": "https://danjuanfunds.com/djapi/index_eva/dj",
- "fetched_at_utc": "2026-11-05T13:58:01+00:00",
- "fetched_at_beijing": "2026-11-05 21:58:01",
+ "fetched_at_utc": "2026-11-06T03:31:42+00:00",
+ "fetched_at_beijing": "2026-11-06 11:31:42",
  "percent_fields_are": "percent (0–100)",
  "count": 63,
  "fields_seen": [
@@ -143,14 +143,14 @@
   {
    "code": "CSIH11136",
    "name": "中国互联",
-   "pe": 17.928,
-   "pb": 2.002,
-   "pe_pct": 15.04,
-   "pb_pct": 1.08,
+   "pe": 19.004,
+   "pb": 2.123,
+   "pe_pct": 18.76,
+   "pb_pct": 3.32,
    "roe": 11.17,
-   "dividend_yield": 1.21,
+   "dividend_yield": 1.14,
    "eva_type": "low",
-   "date": "11-04"
+   "date": "11-05"
   },
   {
    "code": "CSIH30094",
@@ -179,10 +179,10 @@
   {
    "code": "CSIH30533",
    "name": "中概互联50",
-   "pe": 16.744,
-   "pb": 2.067,
-   "pe_pct": 5.64,
-   "pb_pct": 2.96,
+   "pe": 16.777,
+   "pb": 2.071,
+   "pe_pct": 5.84,
+   "pb_pct": 3.0,
    "roe": 12.34,
    "dividend_yield": 1.08,
    "eva_type": "low",
@@ -215,38 +215,38 @@
   {
    "code": "HKHSCEI",
    "name": "国企指数",
-   "pe": 9.779,
-   "pb": 0.918,
-   "pe_pct": 71.84,
-   "pb_pct": 35.52,
-   "roe": 9.39,
-   "dividend_yield": 3.18,
+   "pe": 10.053,
+   "pb": 0.945,
+   "pe_pct": 76.72,
+   "pb_pct": 43.28,
+   "roe": 9.4,
+   "dividend_yield": 3.05,
    "eva_type": "high",
-   "date": "11-04"
+   "date": "11-05"
   },
   {
    "code": "HKHSI",
    "name": "恒生指数",
-   "pe": 10.983,
-   "pb": 1.097,
-   "pe_pct": 58.6,
-   "pb_pct": 49.48,
-   "roe": 9.99,
-   "dividend_yield": 3.41,
+   "pe": 11.287,
+   "pb": 1.128,
+   "pe_pct": 62.92,
+   "pb_pct": 58.36,
+   "roe": 10.0,
+   "dividend_yield": 3.34,
    "eva_type": "high",
-   "date": "11-04"
+   "date": "11-05"
   },
   {
    "code": "HKHSSCNE",
    "name": "新经济",
-   "pe": 22.173,
-   "pb": 2.473,
-   "pe_pct": 31.05,
-   "pb_pct": 25.97,
-   "roe": 11.15,
-   "dividend_yield": 1.16,
-   "eva_type": "mid",
-   "date": "11-04"
+   "pe": 23.399,
+   "pb": 2.62,
+   "pe_pct": 43.94,
+   "pb_pct": 34.97,
+   "roe": 11.2,
+   "dividend_yield": 1.09,
+   "eva_type": "high",
+   "date": "11-05"
   },
   {
    "code": "HKHSTECH",
@@ -263,26 +263,26 @@
   {
    "code": "HSFML25",
    "name": "香港大盘",
-   "pe": 9.567,
-   "pb": 0.951,
-   "pe_pct": 58.52,
-   "pb_pct": 28.76,
-   "roe": 9.94,
-   "dividend_yield": 3.31,
-   "eva_type": "mid",
-   "date": "11-04"
+   "pe": 9.842,
+   "pb": 0.979,
+   "pe_pct": 66.0,
+   "pb_pct": 36.04,
+   "roe": 9.95,
+   "dividend_yield": 3.18,
+   "eva_type": "high",
+   "date": "11-05"
   },
   {
    "code": "NDX",
    "name": "纳指100",
-   "pe": 27.482,
-   "pb": 8.403,
-   "pe_pct": 28.28,
-   "pb_pct": 62.8,
+   "pe": 25.962,
+   "pb": 7.94,
+   "pe_pct": 20.04,
+   "pb_pct": 55.4,
    "roe": 30.58,
-   "dividend_yield": 0.46,
+   "dividend_yield": 0.48,
    "eva_type": "mid",
-   "date": "11-04"
+   "date": "11-05"
   },
   {
    "code": "SH000010",
@@ -491,7 +491,7 @@
   {
    "code": "SH000993",
    "name": "全指信息",
-   "pe": 38.044,
+   "pe": 38.045,
    "pb": 4.616,
    "pe_pct": 12.68,
    "pb_pct": 76.36,
@@ -503,14 +503,14 @@
   {
    "code": "SP500",
    "name": "标普500",
-   "pe": 23.927,
-   "pb": 5.387,
-   "pe_pct": 44.48,
-   "pb_pct": 90.44,
+   "pe": 22.838,
+   "pb": 5.14,
+   "pe_pct": 24.76,
+   "pb_pct": 84.96,
    "roe": 22.51,
-   "dividend_yield": 1.03,
-   "eva_type": "high",
-   "date": "11-04"
+   "dividend_yield": 1.08,
+   "eva_type": "mid",
+   "date": "11-05"
   },
   {
    "code": "SPACEVCP",
@@ -539,14 +539,14 @@
   {
    "code": "SPHCMSHP",
    "name": "香港中小",
-   "pe": 16.876,
-   "pb": 1.254,
-   "pe_pct": 76.08,
-   "pb_pct": 43.96,
+   "pe": 17.273,
+   "pb": 1.284,
+   "pe_pct": 79.64,
+   "pb_pct": 48.0,
    "roe": 7.43,
-   "dividend_yield": 2.69,
+   "dividend_yield": 2.6,
    "eva_type": "high",
-   "date": "11-04"
+   "date": "11-05"
   },
   {
    "code": "SZ399001",
