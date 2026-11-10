@@ -140,7 +140,8 @@ def get_json(url, headers, attempts=2, timeout=40):
                 break
         except Exception as e:                       # timeouts, resets, bad JSON
             last = e
-        time.sleep(3 * (i + 1))
+        if i + 1 < attempts:
+            time.sleep(3 * (i + 1))         # wait before a retry, not after the last attempt
     raise last
 
 
@@ -620,9 +621,13 @@ CFFEX_MONTH = "http://www.cffex.com.cn/sj/historysj/{ym}/zip/{ym}.zip"
 IF_FILE_REL = os.path.join("history", "futures", "IF.json")
 IF_HISTORY_YEARS = 4
 IF_MIN_DTE = 5                     # contracts this close to expiry are not used (annualising explodes)
+CFFEX_BUDGET = float(os.environ.get("MARKET_CFFEX_BUDGET", 180))   # seconds of CFFEX downloading per run
+CFFEX_FILE_DEADLINE = 45           # whole-download limit per file (a slow trickle never trips the socket timeout)
+CFFEX_MAX_FAILURES = 3             # in a row: stop for this run, the next run continues
 
 
-def get_bytes(url, headers, attempts=2, timeout=40):
+def get_bytes(url, headers, attempts=2, timeout=20, deadline=CFFEX_FILE_DEADLINE):
+    """Download with a limit on the WHOLE transfer (urlopen's timeout only limits each wait for data)."""
     if SAMPLE_DIR:
         return _sample_lookup(url)
     h = {"User-Agent": UA, "Accept-Language": "zh-CN,zh;q=0.9"}
@@ -630,15 +635,24 @@ def get_bytes(url, headers, attempts=2, timeout=40):
     last = None
     for i in range(attempts):
         try:
+            t0 = time.monotonic()
             with urllib.request.urlopen(urllib.request.Request(url, headers=h), timeout=timeout) as r:
-                return r.read()
+                chunks = []
+                while True:
+                    b = r.read1(65536)          # read1: returns what has arrived; read() would wait for 64 KB or the end
+                    if not b:
+                        return b"".join(chunks)
+                    chunks.append(b)
+                    if time.monotonic() - t0 > deadline:
+                        raise TimeoutError(f"download took longer than {deadline}s")
         except urllib.error.HTTPError as e:
             last = e
             if e.code in (403, 404):
                 break
         except Exception as e:
             last = e
-        time.sleep(3 * (i + 1))
+        if i + 1 < attempts:
+            time.sleep(3 * (i + 1))         # wait before a retry, not after the last attempt
     raise last
 
 
@@ -687,56 +701,91 @@ def if_main(rows, day):
 
 
 def update_if_history(today):
-    """Keeps {date: [contract, close, settle, oi]} for the main IF contract. Monthly zips for past months,
-    daily CSVs for the current month. Returns (rows, fetched_count)."""
+    """Keeps {date: [contract, close, settle, oi]} for the main IF contract.
+    Past months come from monthly zips, newest first (so ~1 year — enough for the component — arrives
+    first), within CFFEX_BUDGET seconds per run; the current month from daily CSVs. Progress is saved
+    after every file, so a run that is stopped early loses nothing. Returns (rows, fetched_count)."""
     path = os.path.join(DATA_DIR, IF_FILE_REL)
     st = read_json(path, {}) or {}
     rows, months_done = dict(st.get("rows", {})), set(st.get("months_done", []))
-    fetched = 0
-    first = years_before(today, IF_HISTORY_YEARS).replace(day=1)
-    cur_month = today.strftime("%Y%m")
-    m = first
-    while m.strftime("%Y%m") < cur_month:
-        ym = m.strftime("%Y%m")
-        # its own elapsed-time check (one zip per month; 48 months is a one-off of about a minute)
-        if ym not in months_done and TIME_BUDGET - (time.monotonic() - STARTED) > 90:
-            try:
-                z = zipfile.ZipFile(io.BytesIO(get_bytes(CFFEX_MONTH.format(ym=ym), CFFEX_HEADERS)))
-                for name in z.namelist():
-                    mt = re.match(r"(\d{8})_1\.csv$", name)
-                    if not mt:
-                        continue
-                    day = ymd(mt.group(1))
-                    main = if_main(parse_cffex_csv(z.read(name), day), day)
-                    if main:
-                        rows[day] = list(main)
-                months_done.add(ym)
-                fetched += 1
-            except Exception as e:
-                log(f"  CFFEX month {ym} failed: {type(e).__name__}: {e}")
-            pause()
-        m = (m.replace(day=28) + timedelta(days=4)).replace(day=1)
+    fetched, failures, t_start = 0, 0, time.monotonic()
+    keep = years_before(today, IF_HISTORY_YEARS + 1).isoformat()
+
+    def save():
+        nonlocal rows
+        rows = {k: v for k, v in sorted(rows.items()) if k >= keep}
+        write_if_changed(path, {"note": "main 沪深300 index future (IF) per day: [contract, close, settlement, open interest]",
+                                "months_done": sorted(months_done), "rows": rows}, ignore=())
+
+    def budget_left():
+        return (time.monotonic() - t_start < CFFEX_BUDGET and failures < CFFEX_MAX_FAILURES
+                and TIME_BUDGET - (time.monotonic() - STARTED) > 90)
+
+    # current month first (daily files; usually one new file per run)
     d = today.replace(day=1)
-    while d <= today:
+    while d <= today and budget_left():
         day = d.isoformat()
         if d.weekday() < 5 and day not in rows:
+            t0 = time.monotonic()
             try:
                 raw = get_bytes(CFFEX_DAY.format(ym=d.strftime("%Y%m"), dd=d.strftime("%d"), ymd=d.strftime("%Y%m%d")), CFFEX_HEADERS)
                 main = if_main(parse_cffex_csv(raw, day), day)
                 if main:
                     rows[day] = list(main)
                 fetched += 1
+                failures = 0
+                log(f"  CFFEX {day}: {len(raw) // 1024} KB in {time.monotonic() - t0:.1f}s" + (f", main {main[0]}" if main else ""))
+                save()
             except urllib.error.HTTPError as e:
                 if e.code != 404:                       # 404: holiday, or today's file not out yet
-                    log(f"  CFFEX day {day} failed: HTTP {e.code}")
+                    failures += 1
+                    log(f"  CFFEX {day} failed: HTTP {e.code}")
             except Exception as e:
-                log(f"  CFFEX day {day} failed: {type(e).__name__}: {e}")
+                failures += 1
+                log(f"  CFFEX {day} failed after {time.monotonic() - t0:.0f}s: {type(e).__name__}: {e}")
             pause()
         d += timedelta(days=1)
-    keep = years_before(today, IF_HISTORY_YEARS + 1).isoformat()
-    rows = {k: v for k, v in sorted(rows.items()) if k >= keep}
-    write_if_changed(path, {"note": "main 沪深300 index future (IF) per day: [contract, close, settlement, open interest]",
-                            "months_done": sorted(months_done), "rows": rows}, ignore=())
+
+    # past months, newest first
+    first = years_before(today, IF_HISTORY_YEARS).replace(day=1).strftime("%Y%m")
+    m = (today.replace(day=1) - timedelta(days=1)).replace(day=1)
+    todo = []
+    while m.strftime("%Y%m") >= first:
+        if m.strftime("%Y%m") not in months_done:
+            todo.append(m.strftime("%Y%m"))
+        m = (m - timedelta(days=1)).replace(day=1)
+    for ym in todo:
+        if not budget_left():
+            break
+        t0 = time.monotonic()
+        try:
+            raw = get_bytes(CFFEX_MONTH.format(ym=ym), CFFEX_HEADERS)
+            z = zipfile.ZipFile(io.BytesIO(raw))
+            n = 0
+            for name in z.namelist():
+                mt = re.match(r"(\d{8})_1\.csv$", name)
+                if not mt:
+                    continue
+                day = ymd(mt.group(1))
+                main = if_main(parse_cffex_csv(z.read(name), day), day)
+                if main:
+                    rows[day] = list(main)
+                    n += 1
+            months_done.add(ym)
+            fetched += 1
+            failures = 0
+            log(f"  CFFEX {ym}: {n} days, {len(raw) // 1024} KB in {time.monotonic() - t0:.1f}s")
+            save()
+        except Exception as e:
+            failures += 1
+            log(f"  CFFEX {ym} failed after {time.monotonic() - t0:.0f}s: {type(e).__name__}: {e}")
+        pause()
+    left = sum(1 for ym in todo if ym not in months_done)
+    if left:
+        why = ("time budget used" if time.monotonic() - t_start >= CFFEX_BUDGET else
+               f"{failures} failures in a row" if failures >= CFFEX_MAX_FAILURES else "run time budget")
+        log(f"  CFFEX: {left} months still to download ({why}); the next run continues")
+    save()
     return rows, fetched
 
 
