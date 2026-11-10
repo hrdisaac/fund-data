@@ -1,28 +1,34 @@
 #!/usr/bin/env python3
 """
-Probe 2: settle the details the first probe cut off. Read-only; writes nothing.
+Probe 3: can we get 沪深300 股指期货 (IF) prices for the futures-basis component?  Read-only; writes nothing.
 Run "Probe data sources" from the Actions tab and paste the whole log into the chat.
+
+Checks:
+  A) CFFEX daily statistics for a recent trading day (CSV and XML forms)
+  B) CFFEX monthly history archive (zip) for a past month: files inside, header, IF rows
+  C) Eastmoney: how CFFEX futures are coded (list of contracts), a live quote, and daily history depth
 """
+import io
 import json
 import urllib.error
 import urllib.request
+import zipfile
 from datetime import datetime, timedelta, timezone
 
 BJ = timezone(timedelta(hours=8))
 NOW = datetime.now(BJ)
-TODAY = NOW.strftime("%Y%m%d")
-RECENT = (NOW - timedelta(days=12)).strftime("%Y%m%d")
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
-CSI = {"Referer": "https://www.csindex.com.cn/", "Accept": "application/json"}
-EM = {"Referer": "https://data.eastmoney.com/"}
-DJ = {"Referer": "https://danjuanfunds.com/djmodule/value-center", "Accept": "application/json"}
+CF = {"Referer": "http://www.cffex.com.cn/"}
+EM = {"Referer": "https://quote.eastmoney.com/"}
+UT = "bd1d9ddb04089700cf9c27f6f7426281"
 
 
-def get(url, extra):
+def get(url, extra, raw=False):
     h = {"User-Agent": UA, "Accept-Language": "zh-CN,zh;q=0.9"}
     h.update(extra)
     with urllib.request.urlopen(urllib.request.Request(url, headers=h), timeout=40) as r:
-        return json.loads(r.read().decode("utf-8", errors="replace"))
+        body = r.read()
+        return (r.status, r.headers.get("Content-Type"), body) if raw else json.loads(body.decode("utf-8", errors="replace"))
 
 
 def section(title):
@@ -39,72 +45,105 @@ def safe(fn):
         print(f"  ❌ {type(e).__name__}: {e}")
 
 
-def csi_recent(code):
+def decode(b):
+    for enc in ("utf-8", "gbk"):
+        try:
+            return b.decode(enc), enc
+        except UnicodeDecodeError:
+            pass
+    return b.decode("utf-8", errors="replace"), "utf-8?"
+
+
+def recent_weekdays(n):
+    d, out = NOW.date() - timedelta(days=1), []
+    while len(out) < n:
+        if d.weekday() < 5:
+            out.append(d)
+        d -= timedelta(days=1)
+    return out
+
+
+def cffex_daily():
+    for d in recent_weekdays(3):
+        ym, dd, ymd = d.strftime("%Y%m"), d.strftime("%d"), d.strftime("%Y%m%d")
+        for url in (f"http://www.cffex.com.cn/sj/hqsj/rtj/{ym}/{dd}/{ymd}_1.csv",
+                    f"http://www.cffex.com.cn/sj/hqsj/rtj/{ym}/{dd}/index.xml"):
+            def run(url=url):
+                status, ctype, body = get(url, CF, raw=True)
+                text, enc = decode(body)
+                print(f"  {url}\n    HTTP {status}, {ctype}, {len(body)} bytes, {enc}")
+                lines = [l for l in text.splitlines() if l.strip()]
+                for l in lines[:2]:
+                    print(f"    {l[:300]}")
+                if_lines = [l for l in lines if "IF" in l][:4]
+                for l in if_lines:
+                    print(f"    IF: {l[:300]}")
+            safe(run)
+
+
+def cffex_month():
+    m = (NOW.replace(day=1) - timedelta(days=40)).strftime("%Y%m")
+    old = (NOW.replace(day=1) - timedelta(days=3 * 365)).strftime("%Y%m")
+    for ym in (m, old):
+        url = f"http://www.cffex.com.cn/sj/historysj/{ym}/zip/{ym}.zip"
+
+        def run(url=url):
+            status, ctype, body = get(url, CF, raw=True)
+            print(f"  {url}\n    HTTP {status}, {ctype}, {len(body)} bytes")
+            z = zipfile.ZipFile(io.BytesIO(body))
+            names = z.namelist()
+            print(f"    {len(names)} files, e.g. {names[:4]}")
+            text, enc = decode(z.read(names[0]))
+            lines = [l for l in text.splitlines() if l.strip()]
+            print(f"    {names[0]} ({enc}): header {lines[0][:300]}")
+            for l in [l for l in lines if l.startswith("IF")][:4]:
+                print(f"    IF: {l[:300]}")
+        safe(run)
+
+
+def em_list():
     def run():
-        j = get(f"https://www.csindex.com.cn/csindex-home/perf/index-perf?indexCode={code}&startDate={RECENT}&endDate={TODAY}", CSI)
-        rows = j.get("data") or []
-        print(f"  {len(rows)} rows")
-        if rows:
-            print(f"  ALL FIELDS: {list(rows[-1].keys())}")
-            print(f"  latest row: {json.dumps(rows[-1], ensure_ascii=False)[:900]}")
-    return run
+        url = (f"https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=60&po=1&np=1&fltt=2&invt=2&fid=f3&fs=m:8"
+               f"&fields=f12,f13,f14,f2,f3,f17,f18,f28&ut={UT}")
+        j = get(url, EM)
+        diff = (j.get("data") or {}).get("diff") or []
+        print(f"  {len(diff)} contracts on market 8")
+        for r in [r for r in diff if "IF" in str(r.get("f12", "")) or "沪深" in str(r.get("f14", ""))][:10]:
+            print(f"    {json.dumps(r, ensure_ascii=False)}")
+        if not diff:
+            print(f"  reply: {json.dumps(j, ensure_ascii=False)[:400]}")
+    safe(run)
 
 
-def csi_history_depth():
-    j = get(f"https://www.csindex.com.cn/csindex-home/perf/index-perf?indexCode=000906&startDate=20160101&endDate={TODAY}", CSI)
-    rows = j.get("data") or []
-    keys = [k for k in (rows[-1].keys() if rows else []) if "pe" in k.lower() or "pb" in k.lower() or "yield" in k.lower() or "div" in k.lower()]
-    print(f"  {len(rows)} rows for 中证800; valuation-like fields: {keys}")
-    for k in keys:
-        vals = [r for r in rows if r.get(k) not in (None, "", 0)]
-        print(f"  field {k}: {len(vals)} non-empty; first {vals[0]['tradeDate'] if vals else '--'} = {vals[0].get(k) if vals else '--'}; "
-              f"latest {vals[-1]['tradeDate'] if vals else '--'} = {vals[-1].get(k) if vals else '--'}")
-
-
-def em_report(name, extra_qs="", n=3):
-    def run():
-        j = get(f"https://datacenter-web.eastmoney.com/api/data/v1/get?reportName={name}&columns=ALL&pageSize={n}{extra_qs}", EM)
-        res = j.get("result")
-        if not res:
-            print(f"  ⚠ {j.get('message')}")
-            return
-        data = res.get("data") or []
-        print(f"  pages {res.get('pages')}, count {res.get('count')}")
-        if data:
-            print(f"  ALL FIELDS: {list(data[0].keys())}")
-            for row in data[:n]:
-                print(f"  row: {json.dumps(row, ensure_ascii=False)[:700]}")
-    return run
-
-
-def dj_hist(code):
-    def run():
-        j = get(f"https://danjuanfunds.com/djapi/index_eva/pe_history/{code}?day=all", DJ)
-        pts = ((j.get("data") or {}).get("index_eva_pe_growths")) or []
-        print(f"  {len(pts)} PE points" + (f"; first {pts[0]}; last {pts[-1]}" if pts else " (none)"))
-    return run
+def em_quote_and_history():
+    m = NOW.month
+    ym = NOW.strftime("%y%m")
+    cands = ["8.IFM", f"8.IF{ym}", "8.040120", "8.IF00", "220.IFM"]
+    for secid in cands:
+        def q(secid=secid):
+            url = f"https://push2.eastmoney.com/api/qt/stock/get?secid={secid}&fields=f43,f57,f58,f60,f86,f169,f170&ut={UT}"
+            j = get(url, EM)
+            print(f"  quote {secid}: {json.dumps(j.get('data'), ensure_ascii=False)[:300]}")
+        safe(q)
+        def k(secid=secid):
+            url = (f"https://push2his.eastmoney.com/api/qt/stock/kline/get?secid={secid}&fields1=f1,f2,f3,f4,f5,f6"
+                   f"&fields2=f51,f52,f53,f54,f55,f56,f57&klt=101&fqt=0&end=20500101&lmt=1000&ut={UT}")
+            j = get(url, EM)
+            ks = (j.get("data") or {}).get("klines") or []
+            print(f"  kline {secid}: {len(ks)} days" + (f", first {ks[0][:60]}, last {ks[-1][:60]}" if ks else ""))
+        safe(k)
 
 
 def main():
-    print(f"Probe 2 at {NOW.strftime('%Y-%m-%d %H:%M')} Beijing\n")
-    for code, name in [("000906", "中证800"), ("931151", "光伏产业"), ("932000", "中证2000"), ("000510", "中证A500"),
-                       ("399976", "CS新能车"), ("H30269", "红利低波"), ("930713", "人工智能")]:
-        section(f"CSI daily data, last 12 days: {name} {code}")
-        safe(csi_recent(code))
-    section("CSI daily data: how far back do valuation fields go (中证800, from 2016)?")
-    safe(csi_history_depth)
-    section("Eastmoney market valuation RPT_VALUEMARKET (all fields, latest rows)")
-    safe(em_report("RPT_VALUEMARKET", "&sortColumns=TRADE_DATE&sortTypes=-1", n=8))
-    section("Eastmoney industry valuation: one industry's history depth (earliest rows)")
-    safe(em_report("RPT_VALUEINDUSTRY_DET", '&sortColumns=TRADE_DATE&sortTypes=1&filter=(BOARD_CODE%3D%22016058%22)', n=2))
-    section("Eastmoney industry valuation: list of industries on the latest day")
-    safe(em_report("RPT_VALUEINDUSTRY_DET", '&sortColumns=TRADE_DATE&sortTypes=-1&pageSize=1', n=1))
-    for rpt in ["RPTA_WEB_MARGIN_DAILYTRADE", "RPTA_RZRQ_LSHJ", "RPT_MARGIN_TRADING_MARKET", "RPTA_WEB_RZRQ_LSSH"]:
-        section(f"Margin trading report candidate: {rpt}")
-        safe(em_report(rpt, "", n=2))
-    for code in ["SZ399006", "CSIH30269", "HKHSTECH", "SH000906"]:
-        section(f"蛋卷 PE history: {code}")
-        safe(dj_hist(code))
+    print(f"Probe 3 at {NOW.strftime('%Y-%m-%d %H:%M')} Beijing\n")
+    section("A) CFFEX daily statistics, last 3 weekdays (CSV and XML)")
+    cffex_daily()
+    section("B) CFFEX monthly history archive (recent month and ~3 years ago)")
+    cffex_month()
+    section("C1) Eastmoney: CFFEX contracts on market 8 (how IF is coded)")
+    em_list()
+    section("C2) Eastmoney: quote + daily history for candidate IF codes")
+    em_quote_and_history()
     print("=" * 100)
     print("Done. Please paste this whole log into the chat.")
 
