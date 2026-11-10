@@ -17,7 +17,9 @@ Market indicators for the fund viewer (standard library only; runs daily in GitH
        成交活跃度 (中证全指 5-day average turnover vs its 60-day average), 量能方向 (share of the last
        10 days' turnover traded on rising days), 避险需求 (20-day return of 沪深300 minus a bond index),
        杠杆率 (margin trading as % of turnover, one day late), 动量 (沪深300 vs its 125-day average),
-       波动率 (20-day realised volatility of 沪深300, annualised; high = fear).
+       波动率 (20-day realised volatility of 沪深300, annualised; high = fear),
+       期货升贴水 (annualised basis of the main 沪深300 index future IF vs the index; CFFEX daily
+       statistics, history kept in data/history/futures/IF.json).
      "live" carries what the app needs to recompute the components during the trading day.
 
   3) 低估行业个数 / number of undervalued industries  → data/market.json  ("industries")
@@ -32,7 +34,9 @@ part keeps its previous answer (marked with an error). The script never deletes 
 Local test without network:  python fetch_market.py --from-dir samples/   (see test_fetch_market.py)
 """
 import bisect
+import io
 import math
+import zipfile
 import collections
 import json
 import os
@@ -607,6 +611,147 @@ FG_META = {
     "volatility": ("波动率", "%", "沪深300 近 20 日收益率的年化标准差（越高越恐惧，得分反向）"),
 }
 FG_INVERT = {"volatility"}
+FG_META["basis"] = ("期货升贴水", "%", "沪深300 股指期货主力合约相对指数的年化升贴水（贴水为负，越低越恐惧）")
+
+# ---- CFFEX: 沪深300 股指期货 (IF) daily statistics
+CFFEX_HEADERS = {"Referer": "http://www.cffex.com.cn/"}
+CFFEX_DAY = "http://www.cffex.com.cn/sj/hqsj/rtj/{ym}/{dd}/{ymd}_1.csv"
+CFFEX_MONTH = "http://www.cffex.com.cn/sj/historysj/{ym}/zip/{ym}.zip"
+IF_FILE_REL = os.path.join("history", "futures", "IF.json")
+IF_HISTORY_YEARS = 4
+IF_MIN_DTE = 5                     # contracts this close to expiry are not used (annualising explodes)
+
+
+def get_bytes(url, headers, attempts=2, timeout=40):
+    if SAMPLE_DIR:
+        return _sample_lookup(url)
+    h = {"User-Agent": UA, "Accept-Language": "zh-CN,zh;q=0.9"}
+    h.update(headers)
+    last = None
+    for i in range(attempts):
+        try:
+            with urllib.request.urlopen(urllib.request.Request(url, headers=h), timeout=timeout) as r:
+                return r.read()
+        except urllib.error.HTTPError as e:
+            last = e
+            if e.code in (403, 404):
+                break
+        except Exception as e:
+            last = e
+        time.sleep(3 * (i + 1))
+    raise last
+
+
+def if_expiry(contract):
+    """IF2612 → third Friday of 2026-12 (holiday shifts ignored: at most a few days)."""
+    y, m = 2000 + int(contract[2:4]), int(contract[4:6])
+    d = date(y, m, 1)
+    first_friday = d + timedelta(days=(4 - d.weekday()) % 7)
+    return first_friday + timedelta(days=14)
+
+
+def parse_cffex_csv(raw, day):
+    """CFFEX daily CSV (GBK) → [(contract, close, settle, open_interest)] for IF futures."""
+    for enc in ("gbk", "utf-8"):
+        try:
+            text = raw.decode(enc)
+            break
+        except UnicodeDecodeError:
+            continue
+    else:
+        text = raw.decode("gbk", errors="replace")
+    lines = [l for l in text.splitlines() if l.strip()]
+    if not lines:
+        return []
+    head = [h.strip() for h in lines[0].split(",")]
+    try:
+        i_code, i_close, i_settle, i_oi = head.index("合约代码"), head.index("今收盘"), head.index("今结算"), head.index("持仓量")
+    except ValueError:
+        raise RuntimeError(f"unexpected CFFEX header {head[:8]}")
+    out = []
+    for l in lines[1:]:
+        f = [x.strip() for x in l.split(",")]
+        if len(f) <= max(i_code, i_close, i_settle, i_oi) or not re.fullmatch(r"IF\d{4}", f[i_code]):
+            continue
+        close, settle, oi = num(f[i_close]), num(f[i_settle]), num(f[i_oi])
+        if close and close > 0 and oi is not None:
+            out.append((f[i_code], close, settle, int(oi)))
+    return out
+
+
+def if_main(rows, day):
+    """The main contract on a day: most open interest among contracts ≥ IF_MIN_DTE days from expiry."""
+    d = d_of(day)
+    ok = [r for r in rows if (if_expiry(r[0]) - d).days >= IF_MIN_DTE]
+    return max(ok, key=lambda r: (r[3], -int(r[0][2:]))) if ok else None
+
+
+def update_if_history(today):
+    """Keeps {date: [contract, close, settle, oi]} for the main IF contract. Monthly zips for past months,
+    daily CSVs for the current month. Returns (rows, fetched_count)."""
+    path = os.path.join(DATA_DIR, IF_FILE_REL)
+    st = read_json(path, {}) or {}
+    rows, months_done = dict(st.get("rows", {})), set(st.get("months_done", []))
+    fetched = 0
+    first = years_before(today, IF_HISTORY_YEARS).replace(day=1)
+    cur_month = today.strftime("%Y%m")
+    m = first
+    while m.strftime("%Y%m") < cur_month:
+        ym = m.strftime("%Y%m")
+        # its own elapsed-time check (one zip per month; 48 months is a one-off of about a minute)
+        if ym not in months_done and TIME_BUDGET - (time.monotonic() - STARTED) > 90:
+            try:
+                z = zipfile.ZipFile(io.BytesIO(get_bytes(CFFEX_MONTH.format(ym=ym), CFFEX_HEADERS)))
+                for name in z.namelist():
+                    mt = re.match(r"(\d{8})_1\.csv$", name)
+                    if not mt:
+                        continue
+                    day = ymd(mt.group(1))
+                    main = if_main(parse_cffex_csv(z.read(name), day), day)
+                    if main:
+                        rows[day] = list(main)
+                months_done.add(ym)
+                fetched += 1
+            except Exception as e:
+                log(f"  CFFEX month {ym} failed: {type(e).__name__}: {e}")
+            pause()
+        m = (m.replace(day=28) + timedelta(days=4)).replace(day=1)
+    d = today.replace(day=1)
+    while d <= today:
+        day = d.isoformat()
+        if d.weekday() < 5 and day not in rows:
+            try:
+                raw = get_bytes(CFFEX_DAY.format(ym=d.strftime("%Y%m"), dd=d.strftime("%d"), ymd=d.strftime("%Y%m%d")), CFFEX_HEADERS)
+                main = if_main(parse_cffex_csv(raw, day), day)
+                if main:
+                    rows[day] = list(main)
+                fetched += 1
+            except urllib.error.HTTPError as e:
+                if e.code != 404:                       # 404: holiday, or today's file not out yet
+                    log(f"  CFFEX day {day} failed: HTTP {e.code}")
+            except Exception as e:
+                log(f"  CFFEX day {day} failed: {type(e).__name__}: {e}")
+            pause()
+        d += timedelta(days=1)
+    keep = years_before(today, IF_HISTORY_YEARS + 1).isoformat()
+    rows = {k: v for k, v in sorted(rows.items()) if k >= keep}
+    write_if_changed(path, {"note": "main 沪深300 index future (IF) per day: [contract, close, settlement, open interest]",
+                            "months_done": sorted(months_done), "rows": rows}, ignore=())
+    return rows, fetched
+
+
+def basis_series(if_rows, close300):
+    """Annualised basis in %: (F / S − 1) × 365 / days to expiry × 100."""
+    out = []
+    for day in sorted(if_rows):
+        if day not in close300:
+            continue
+        contract, close, _, _ = if_rows[day]
+        dte = (if_expiry(contract) - d_of(day)).days
+        if dte < IF_MIN_DTE:
+            continue
+        out.append((day, 100 * (close / close300[day] - 1) * 365 / dte))
+    return out
 
 
 def fg_block(comps, trade_dates, closes, sources, bond_tail=()):
@@ -647,7 +792,9 @@ def fg_block(comps, trade_dates, closes, sources, bond_tail=()):
     live = {"as_of": d, "windows": {k: sorted(round(v, 4) for _, v in comps[k][-FG_WINDOW:]) for k in keys},
             "invert": sorted(FG_INVERT & set(keys)), "need": need,
             "leverage": next(({"value": c["value"], "score": c["score"], "date": c["date"]} for c in comp_out if c["key"] == "leverage"), None),
-            "bond": [[int(x[0].replace("-", "")), x[1]] for x in bond_tail]}
+            "bond": [[int(x[0].replace("-", "")), x[1]] for x in bond_tail],
+            # each component's latest value/score: the app uses these for anything it cannot recompute live
+            "last": {c["key"]: {"value": c["value"], "score": c["score"], "date": c["date"]} for c in comp_out if c["score"] is not None}}
     return {"date": d, "score": round(score, 1), "band": fg_band(score), "included": n, "components": comp_out, "live": live,
             "window_days": FG_WINDOW, "min_days": FG_MIN,
             "ago": {"d1": ago(1), "w1": ago(5), "m1": ago(21), "y1": ago(250)},
@@ -690,10 +837,25 @@ def run_fear_greed(today):
         margin = {}
         log(f"  margin data failed: {type(e).__name__}: {e}")
     sources["momentum"] = "沪深300（中证指数官网）"
+    if_rows = {}
+    try:
+        if_rows, n_req = update_if_history(today)
+        log(f"  IF futures: {len(if_rows)} days of the main contract ({n_req} CFFEX files fetched this run)"
+            + (f", latest {max(if_rows)} {if_rows[max(if_rows)][0]} close {if_rows[max(if_rows)][1]}" if if_rows else ""))
+        sources["basis"] = "中国金融期货交易所 日统计（主力合约 = 持仓量最大、距到期 5 天以上）"
+    except Exception as e:
+        log(f"  IF futures failed: {type(e).__name__}: {e}")
     comps = fg_series(close300, amounts, bond, margin, all_close)
+    bs = basis_series(if_rows, close300)
+    if len(bs) >= FG_MIN:
+        comps["basis"] = bs
     for k, v in comps.items():
         log(f"  component {k}: {len(v)} days, latest {v[-1][0] if v else '--'} = {v[-1][1]:.3f}" if v else f"  component {k}: empty")
     b = fg_block(comps, sorted(close300), close300, sources, sorted(bond.items())[-21:])  # bond closes for the app's 20-day return
+    if if_rows:
+        last = max(if_rows)
+        c = if_rows[last]
+        b["live"]["futures"] = {"date": last, "contract": c[0], "close": c[1], "expiry": if_expiry(c[0]).isoformat()}
     log(f"Fear & greed: {b['date']} score {b['score']} ({b['band']}) from {b['included']} components: "
         + ", ".join(f"{c['name']} {c['score']}" for c in b["components"]))
     return b
