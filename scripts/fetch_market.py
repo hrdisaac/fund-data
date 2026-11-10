@@ -58,6 +58,7 @@ BJ = timezone(timedelta(hours=8))
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/124.0 Safari/537.36")
 
+RELAY_VERSION = "v14.5"               # printed first in the log, so the Actions log shows which script ran
 ERP_INDEX = "000906"                 # 中证800 (the default, published as "erp")
 ERP_OTHERS = [("000300", "沪深300"), ("000905", "中证500"), ("000852", "中证1000"), ("000985", "中证全指")]
 ERP_HISTORY_YEARS = 20               # requested history for ERP indices (CSI returns what it has)
@@ -1251,6 +1252,7 @@ def main():
         MARKET_OUT = os.path.join(DATA_DIR, "market.json")
         IND_DIR = os.path.join(DATA_DIR, "history", "industry")
     _CSI_CACHE.clear()                                       # the cache is per run
+    log(f"fetch_market.py {RELAY_VERSION}")
     now = datetime.now(BJ)
     if os.environ.get("MARKET_TODAY"):                      # tests: pretend it is another day
         now = datetime.fromisoformat(os.environ["MARKET_TODAY"]).replace(tzinfo=BJ)
