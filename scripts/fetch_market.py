@@ -737,28 +737,35 @@ IV_MIN_DTE = 7
 
 
 def iv_30d(day, if_rows, opts):
-    """30-day implied volatility in % from the at-the-money IO call and put of the two nearest expiries
-    (≥ IV_MIN_DTE days), each priced off the IF contract of the same month; total variance interpolated."""
+    """30-day implied volatility in % from 沪深300 index options (IO), VIX-style:
+    for the two nearest expiries with ≥ IV_MIN_DTE days, the forward comes from put-call parity at the strike
+    where call and put are closest (F = K + C − P; this matches the options' own settlement prices, unlike the
+    futures close), the at-the-money call and put give Black-76 IVs (averaged), and total variance is
+    interpolated to 30 days.  if_rows is unused (kept for the call signature)."""
     d = d_of(day)
-    fut = {c[2:6]: close for c, close, _, _ in if_rows}
     terms = []
     for ym in sorted({o[0] for o in opts}):
         T_days = (if_expiry("IF" + ym) - d).days
-        if T_days < IV_MIN_DTE or ym not in fut:
+        if T_days < IV_MIN_DTE:
             continue
-        F = fut[ym]
         calls = {k: p for y, t, k, p in opts if y == ym and t == "C"}
         puts = {k: p for y, t, k, p in opts if y == ym and t == "P"}
-        both = sorted(set(calls) & set(puts), key=lambda k: abs(k - F))
+        both = [k for k in calls if k in puts]
         if not both:
             continue
-        K = both[0]
+        k0 = min(both, key=lambda k: abs(calls[k] - puts[k]))
+        F = k0 + calls[k0] - puts[k0]
+        K = min(both, key=lambda k: abs(k - F))
         T = T_days / 365
         ivs = [v for v in (implied_vol(calls[K], F, K, T, "C"), implied_vol(puts[K], F, K, T, "P")) if v]
         if ivs:
             terms.append((T, sum(ivs) / len(ivs)))
         if len(terms) == 2:
             break
+    return interp_30d(terms)
+
+
+def interp_30d(terms):
     if not terms:
         return None
     T30 = 30 / 365
