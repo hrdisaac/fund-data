@@ -613,6 +613,8 @@ FG_META = {
 }
 FG_INVERT = {"volatility"}
 FG_META["basis"] = ("期货升贴水", "%", "沪深300 股指期货主力合约相对指数的年化升贴水（贴水为负，越低越恐惧）")
+FG_META["iv"] = ("隐含波动率", "%", "沪深300 股指期权 30 天隐含波动率：近月、次月平值期权按 Black-76 反推，按到期时间插值（越高越恐惧，得分反向）")
+FG_INVERT.add("iv")
 
 # ---- CFFEX: 沪深300 股指期货 (IF) daily statistics
 CFFEX_HEADERS = {"Referer": "http://www.cffex.com.cn/"}
@@ -664,8 +666,8 @@ def if_expiry(contract):
     return first_friday + timedelta(days=14)
 
 
-def parse_cffex_csv(raw, day):
-    """CFFEX daily CSV (GBK) → [(contract, close, settle, open_interest)] for IF futures."""
+def parse_cffex_day(raw):
+    """CFFEX daily CSV (GBK) → (IF rows [(contract, close, settle, oi)], IO rows [(yymm, 'C'|'P', strike, settle)])."""
     for enc in ("gbk", "utf-8"):
         try:
             text = raw.decode(enc)
@@ -682,15 +684,89 @@ def parse_cffex_csv(raw, day):
         i_code, i_close, i_settle, i_oi = head.index("合约代码"), head.index("今收盘"), head.index("今结算"), head.index("持仓量")
     except ValueError:
         raise RuntimeError(f"unexpected CFFEX header {head[:8]}")
-    out = []
+    out, opts = [], []
     for l in lines[1:]:
         f = [x.strip() for x in l.split(",")]
-        if len(f) <= max(i_code, i_close, i_settle, i_oi) or not re.fullmatch(r"IF\d{4}", f[i_code]):
+        if len(f) <= max(i_code, i_close, i_settle, i_oi):
+            continue
+        m = re.fullmatch(r"IO(\d{4})-([CP])-(\d+(?:\.\d+)?)", f[i_code])
+        if m:
+            settle = num(f[i_settle])
+            if settle and settle > 0:
+                opts.append((m.group(1), m.group(2), float(m.group(3)), settle))
+            continue
+        if not re.fullmatch(r"IF\d{4}", f[i_code]):
             continue
         close, settle, oi = num(f[i_close]), num(f[i_settle]), num(f[i_oi])
         if close and close > 0 and oi is not None:
             out.append((f[i_code], close, settle, int(oi)))
-    return out
+    return out, opts
+
+
+def parse_cffex_csv(raw, day):
+    return parse_cffex_day(raw)[0]
+
+
+def _ncdf(x):
+    return 0.5 * (1 + math.erf(x / math.sqrt(2)))
+
+
+def black76(F, K, T, sigma, kind):
+    """Undiscounted Black-76 price (rates are small and T short; the error is far below the rounding of prices)."""
+    sd = sigma * math.sqrt(T)
+    d1 = (math.log(F / K) + sd * sd / 2) / sd
+    d2 = d1 - sd
+    return F * _ncdf(d1) - K * _ncdf(d2) if kind == "C" else K * _ncdf(-d2) - F * _ncdf(-d1)
+
+
+def implied_vol(price, F, K, T, kind):
+    intrinsic = max(0.0, F - K) if kind == "C" else max(0.0, K - F)
+    if T <= 0 or price <= intrinsic + 1e-9 or price >= (F if kind == "C" else K):
+        return None
+    lo, hi = 0.005, 3.0
+    for _ in range(80):
+        mid = (lo + hi) / 2
+        if black76(F, K, T, mid, kind) > price:
+            hi = mid
+        else:
+            lo = mid
+    return (lo + hi) / 2
+
+
+IV_MIN_DTE = 7
+
+
+def iv_30d(day, if_rows, opts):
+    """30-day implied volatility in % from the at-the-money IO call and put of the two nearest expiries
+    (≥ IV_MIN_DTE days), each priced off the IF contract of the same month; total variance interpolated."""
+    d = d_of(day)
+    fut = {c[2:6]: close for c, close, _, _ in if_rows}
+    terms = []
+    for ym in sorted({o[0] for o in opts}):
+        T_days = (if_expiry("IF" + ym) - d).days
+        if T_days < IV_MIN_DTE or ym not in fut:
+            continue
+        F = fut[ym]
+        calls = {k: p for y, t, k, p in opts if y == ym and t == "C"}
+        puts = {k: p for y, t, k, p in opts if y == ym and t == "P"}
+        both = sorted(set(calls) & set(puts), key=lambda k: abs(k - F))
+        if not both:
+            continue
+        K = both[0]
+        T = T_days / 365
+        ivs = [v for v in (implied_vol(calls[K], F, K, T, "C"), implied_vol(puts[K], F, K, T, "P")) if v]
+        if ivs:
+            terms.append((T, sum(ivs) / len(ivs)))
+        if len(terms) == 2:
+            break
+    if not terms:
+        return None
+    T30 = 30 / 365
+    if len(terms) == 1 or terms[0][0] >= T30:
+        return round(100 * terms[0][1], 3)
+    (T1, s1), (T2, s2) = terms
+    var = (T1 * s1 * s1 * (T2 - T30) + T2 * s2 * s2 * (T30 - T1)) / (T2 - T1) / T30
+    return round(100 * math.sqrt(max(var, 0)), 3)
 
 
 def if_main(rows, day):
@@ -707,6 +783,8 @@ def update_if_history(today):
     after every file, so a run that is stopped early loses nothing. Returns (rows, fetched_count)."""
     path = os.path.join(DATA_DIR, IF_FILE_REL)
     st = read_json(path, {}) or {}
+    if st.get("format") != 2:                      # format 2 adds the 30-day implied volatility to each day
+        st = {}
     rows, months_done = dict(st.get("rows", {})), set(st.get("months_done", []))
     fetched, failures, t_start = 0, 0, time.monotonic()
     keep = years_before(today, IF_HISTORY_YEARS + 1).isoformat()
@@ -714,8 +792,9 @@ def update_if_history(today):
     def save():
         nonlocal rows
         rows = {k: v for k, v in sorted(rows.items()) if k >= keep}
-        write_if_changed(path, {"note": "main 沪深300 index future (IF) per day: [contract, close, settlement, open interest]",
-                                "months_done": sorted(months_done), "rows": rows}, ignore=())
+        write_if_changed(path, {"note": "per day: main 沪深300 index future (IF) [contract, close, settlement, open interest] "
+                                        "+ 30-day implied volatility (%) from 沪深300 index options (IO)",
+                                "format": 2, "months_done": sorted(months_done), "rows": rows}, ignore=())
 
     def budget_left():
         return (time.monotonic() - t_start < CFFEX_BUDGET and failures < CFFEX_MAX_FAILURES
@@ -729,9 +808,10 @@ def update_if_history(today):
             t0 = time.monotonic()
             try:
                 raw = get_bytes(CFFEX_DAY.format(ym=d.strftime("%Y%m"), dd=d.strftime("%d"), ymd=d.strftime("%Y%m%d")), CFFEX_HEADERS)
-                main = if_main(parse_cffex_csv(raw, day), day)
+                fr, op = parse_cffex_day(raw)
+                main = if_main(fr, day)
                 if main:
-                    rows[day] = list(main)
+                    rows[day] = list(main) + [iv_30d(day, fr, op)]
                 fetched += 1
                 failures = 0
                 log(f"  CFFEX {day}: {len(raw) // 1024} KB in {time.monotonic() - t0:.1f}s" + (f", main {main[0]}" if main else ""))
@@ -767,9 +847,10 @@ def update_if_history(today):
                 if not mt:
                     continue
                 day = ymd(mt.group(1))
-                main = if_main(parse_cffex_csv(z.read(name), day), day)
+                fr, op = parse_cffex_day(z.read(name))
+                main = if_main(fr, day)
                 if main:
-                    rows[day] = list(main)
+                    rows[day] = list(main) + [iv_30d(day, fr, op)]
                     n += 1
             months_done.add(ym)
             fetched += 1
@@ -789,13 +870,17 @@ def update_if_history(today):
     return rows, fetched
 
 
+def iv_series(if_rows):
+    return [(day, r[4]) for day, r in sorted(if_rows.items()) if len(r) > 4 and r[4] is not None and 3 < r[4] < 150]
+
+
 def basis_series(if_rows, close300):
     """Annualised basis in %: (F / S − 1) × 365 / days to expiry × 100."""
     out = []
     for day in sorted(if_rows):
         if day not in close300:
             continue
-        contract, close, _, _ = if_rows[day]
+        contract, close = if_rows[day][0], if_rows[day][1]
         dte = (if_expiry(contract) - d_of(day)).days
         if dte < IF_MIN_DTE:
             continue
@@ -898,6 +983,14 @@ def run_fear_greed(today):
     bs = basis_series(if_rows, close300)
     if len(bs) >= FG_MIN:
         comps["basis"] = bs
+    ivs = iv_series(if_rows)
+    if len(ivs) >= FG_MIN:                          # option-implied volatility replaces the realised-volatility proxy
+        comps["iv"] = ivs
+        comps.pop("volatility", None)
+        sources["iv"] = "中国金融期货交易所 日统计（沪深300 股指期权结算价）"
+    if ivs:
+        log(f"  IO options: 30-day implied volatility on {len(ivs)} days, latest {ivs[-1][0]} = {ivs[-1][1]}%"
+            + ("" if len(ivs) >= FG_MIN else f" (need {FG_MIN} days before it replaces realised volatility)"))
     for k, v in comps.items():
         log(f"  component {k}: {len(v)} days, latest {v[-1][0] if v else '--'} = {v[-1][1]:.3f}" if v else f"  component {k}: empty")
     b = fg_block(comps, sorted(close300), close300, sources, sorted(bond.items())[-21:])  # bond closes for the app's 20-day return
