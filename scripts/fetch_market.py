@@ -12,11 +12,13 @@ Market indicators for the fund viewer (standard library only; runs daily in GitH
      Bond yields: Eastmoney RPTA_WEB_TREASURYYIELD, field EMM00166466.
 
   4) 恐惧贪婪指数 / fear-and-greed  → data/market.json  ("fear_greed")
-     Four transparent components, each scored 0–100 as its percentile within its own last 500
-     trading days (no look-ahead), averaged with equal weights:
-       成交额 (中证全指 turnover vs its 20-day average), 避险需求 (20-day return of 沪深300 minus a
-       bond index), 杠杆率 (margin trading as % of turnover, Eastmoney RPTA_WEB_MARGIN_DAILYTRADE,
-       one day late), 动量 (沪深300 vs its 125-day average).
+     Six transparent components, each scored 0–100 as its percentile within its own last 500
+     trading days (no look-ahead; volatility inverted), averaged with equal weights:
+       成交活跃度 (中证全指 5-day average turnover vs its 60-day average), 量能方向 (share of the last
+       10 days' turnover traded on rising days), 避险需求 (20-day return of 沪深300 minus a bond index),
+       杠杆率 (margin trading as % of turnover, one day late), 动量 (沪深300 vs its 125-day average),
+       波动率 (20-day realised volatility of 沪深300, annualised; high = fear).
+     "live" carries what the app needs to recompute the components during the trading day.
 
   3) 低估行业个数 / number of undervalued industries  → data/market.json  ("industries")
      Eastmoney RPT_VALUEINDUSTRY_DET (东方财富行业板块, daily PE_TTM / PB_MRQ since 2017).
@@ -30,6 +32,7 @@ part keeps its previous answer (marked with an error). The script never deletes 
 Local test without network:  python fetch_market.py --from-dir samples/   (see test_fetch_market.py)
 """
 import bisect
+import math
 import collections
 import json
 import os
@@ -540,8 +543,9 @@ def fetch_margin():
     return out
 
 
-def rolling_scores(series):
-    """series [(date, value)] sorted → {date: percentile of value within the last FG_WINDOW values}."""
+def rolling_scores(series, invert=False):
+    """series [(date, value)] sorted → {date: percentile of value within the last FG_WINDOW values}
+    (100 − percentile when invert)."""
     win, q, out = [], collections.deque(), {}
     for d, v in series:
         q.append(v)
@@ -549,17 +553,24 @@ def rolling_scores(series):
         if len(q) > FG_WINDOW:
             del win[bisect.bisect_left(win, q.popleft())]
         if len(q) >= FG_MIN:
-            out[d] = pct_below(win, v)
+            p = pct_below(win, v)
+            out[d] = round(100 - p, 2) if invert else p
     return out
 
 
-def fg_series(csi_close, amounts, bond_close, margin):
+def fg_series(csi_close, amounts, bond_close, margin, all_close=None):
     """Raw component series: {key: [(date, value)]} (values in %)."""
     comps = {}
     ds = sorted(amounts)
-    if len(ds) > 20:
+    if len(ds) > 60:
         v = [amounts[d] for d in ds]
-        comps["turnover"] = [(ds[i], 100 * (v[i] / (sum(v[i - 19:i + 1]) / 20) - 1)) for i in range(19, len(ds))]
+        comps["activity"] = [(ds[i], 100 * ((sum(v[i - 4:i + 1]) / 5) / (sum(v[i - 59:i + 1]) / 60) - 1)) for i in range(59, len(ds))]
+    if all_close:
+        dd = [d for d in ds if d in all_close]
+        up = {dd[i]: all_close[dd[i]] > all_close[dd[i - 1]] for i in range(1, len(dd))}
+        dd = dd[1:]
+        comps["vol_direction"] = [(dd[i], 100 * sum(amounts[x] for x in dd[i - 9:i + 1] if up[x]) / sum(amounts[x] for x in dd[i - 9:i + 1]))
+                                  for i in range(9, len(dd))]
     if bond_close:
         common = sorted(set(csi_close) & set(bond_close))
         comps["safe_haven"] = [(common[i], 100 * ((csi_close[common[i]] / csi_close[common[i - 20]])
@@ -577,19 +588,29 @@ def fg_series(csi_close, amounts, bond_close, margin):
                 run += c[i] - c[i - 125]
             mom.append((ds[i], 100 * (c[i] / (run / 125) - 1)))
         comps["momentum"] = mom
+        rets = [c[i] / c[i - 1] - 1 for i in range(1, len(c))]
+        vol = []
+        for i in range(19, len(rets)):
+            w = rets[i - 19:i + 1]
+            m = sum(w) / 20
+            vol.append((ds[i + 1], 100 * math.sqrt(sum((x - m) ** 2 for x in w) / 19) * math.sqrt(250)))
+        comps["volatility"] = vol
     return comps
 
 
 FG_META = {
-    "turnover": ("成交额", "%", "中证全指成交额 ÷ 近 20 日平均 − 1"),
+    "activity": ("成交活跃度", "%", "中证全指近 5 日平均成交额 ÷ 近 60 日平均 − 1"),
+    "vol_direction": ("量能方向", "%", "近 10 个交易日里，上涨日的成交额占全部成交额的比例"),
     "safe_haven": ("避险需求", "%", "沪深300 近 20 日涨跌 − 债券指数近 20 日涨跌"),
     "leverage": ("杠杆率", "%", "两融交易额占 A 股成交额的比例（晚一天公布）"),
     "momentum": ("动量", "%", "沪深300 ÷ 近 125 日平均 − 1"),
+    "volatility": ("波动率", "%", "沪深300 近 20 日收益率的年化标准差（越高越恐惧，得分反向）"),
 }
+FG_INVERT = {"volatility"}
 
 
-def fg_block(comps, trade_dates, closes, sources):
-    scores = {k: rolling_scores(v) for k, v in comps.items()}
+def fg_block(comps, trade_dates, closes, sources, bond_tail=()):
+    scores = {k: rolling_scores(v, k in FG_INVERT) for k, v in comps.items()}
     keys = [k for k in FG_META if k in comps]
     need = max(2, len(keys) - 1)                 # at most one component may be missing on a day
     sd = {k: sorted(scores[k]) for k in keys}
@@ -622,7 +643,12 @@ def fg_block(comps, trade_dates, closes, sources):
     def close_on(x):
         i = bisect.bisect_right(cd, x) - 1
         return closes[cd[i]] if i >= 0 else None
-    return {"date": d, "score": round(score, 1), "band": fg_band(score), "included": n, "components": comp_out,
+    # for the app's intraday recalculation: each component's last FG_WINDOW values up to this day (sorted)
+    live = {"as_of": d, "windows": {k: sorted(round(v, 4) for _, v in comps[k][-FG_WINDOW:]) for k in keys},
+            "invert": sorted(FG_INVERT & set(keys)), "need": need,
+            "leverage": next(({"value": c["value"], "score": c["score"], "date": c["date"]} for c in comp_out if c["key"] == "leverage"), None),
+            "bond": [[int(x[0].replace("-", "")), x[1]] for x in bond_tail]}
+    return {"date": d, "score": round(score, 1), "band": fg_band(score), "included": n, "components": comp_out, "live": live,
             "window_days": FG_WINDOW, "min_days": FG_MIN,
             "ago": {"d1": ago(1), "w1": ago(5), "m1": ago(21), "y1": ago(250)},
             "series": [[int(x[0].replace("-", "")), round(x[1], 1), close_on(x[0])]
@@ -634,10 +660,11 @@ def run_fear_greed(today):
     _, _, rows300, _ = fetch_csi(FG_STOCK, today)
     pause()
     close300 = {d: c for d, c, _ in rows300 if c}
-    amounts = {}
+    amounts, all_close = {}, {}
     for code in FG_TURNOVER:
         try:
-            _, full, _, amounts = fetch_csi(code, today)
+            _, full, rows_t, amounts = fetch_csi(code, today)
+            all_close = {d: c for d, c, _ in rows_t if c}
             pause()
             if len(amounts) > FG_MIN:
                 sources["turnover"] = f"{full or code}（{code}）"
@@ -663,10 +690,10 @@ def run_fear_greed(today):
         margin = {}
         log(f"  margin data failed: {type(e).__name__}: {e}")
     sources["momentum"] = "沪深300（中证指数官网）"
-    comps = fg_series(close300, amounts, bond, margin)
+    comps = fg_series(close300, amounts, bond, margin, all_close)
     for k, v in comps.items():
         log(f"  component {k}: {len(v)} days, latest {v[-1][0] if v else '--'} = {v[-1][1]:.3f}" if v else f"  component {k}: empty")
-    b = fg_block(comps, sorted(close300), close300, sources)
+    b = fg_block(comps, sorted(close300), close300, sources, sorted(bond.items())[-21:])  # bond closes for the app's 20-day return
     log(f"Fear & greed: {b['date']} score {b['score']} ({b['band']}) from {b['included']} components: "
         + ", ".join(f"{c['name']} {c['score']}" for c in b["components"]))
     return b
