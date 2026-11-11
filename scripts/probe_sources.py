@@ -1,102 +1,101 @@
 #!/usr/bin/env python3
 """
-Probe 5c: 申万宏源研究 valuation endpoint (PE/PB/dividend yield) — which request format works, and how far
-back the history goes. Uses the verified-certificate fix from probe 5b. Read-only.
-Paste it into scripts/probe_sources.py, run "Probe data sources", paste the log.
+Probe 6: a live source for the industry heat map (申万一级 if possible). Run it DURING TRADING HOURS
+(9:30–15:00 Beijing). Read-only. Paste it into scripts/probe_sources.py, run "Probe data sources", paste the log.
 """
 import json
-import re
-import ssl
-import subprocess
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import ssl
 from datetime import datetime, timedelta, timezone
 
 BJ = timezone(timedelta(hours=8))
-NOW = datetime.now(BJ)
-HOST = "www.swsresearch.com"
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
-SW = {"Referer": "https://www.swsresearch.com/institute_sw/allIndex/analysisIndex", "Accept": "application/json",
-      "User-Agent": UA, "Accept-Language": "zh-CN,zh;q=0.9"}
-URL = f"https://{HOST}/institute-sw/api/index_analysis/index_analysis_report/"
+EM = {"Referer": "https://quote.eastmoney.com/"}
+UT = "bd1d9ddb04089700cf9c27f6f7426281"
+SW_AIA = "http://cacerts.digicert.cn/GeoTrustG2TLSCNRSA4096SHA2562022CA1.crt"
 
 
-def verified_context():
-    p = subprocess.run(["openssl", "s_client", "-connect", f"{HOST}:443", "-servername", HOST], input=b"", capture_output=True, timeout=40)
-    leaf = re.search(r"-----BEGIN CERTIFICATE-----.*?-----END CERTIFICATE-----", p.stdout.decode("utf-8", "replace"), re.S).group(0)
-    txt = subprocess.run(["openssl", "x509", "-noout", "-text"], input=leaf.encode(), capture_output=True).stdout.decode()
-    aia = re.search(r"CA Issuers - URI:(\S+)", txt).group(1)
-    der = urllib.request.urlopen(urllib.request.Request(aia, headers={"User-Agent": UA}), timeout=30).read()
-    pem = der.decode() if b"BEGIN CERTIFICATE" in der else subprocess.run(
-        ["openssl", "x509", "-inform", "DER", "-outform", "PEM"], input=der, capture_output=True).stdout.decode()
-    ctx = ssl.create_default_context()
-    ctx.load_verify_locations(cadata=pem)
-    print(f"  verified TLS context ready (intermediate from {aia})")
-    return ctx
+def now():
+    return datetime.now(BJ).strftime("%H:%M:%S")
 
 
-def call(ctx, label, params):
-    url = URL + "?" + urllib.parse.urlencode(params)
+def section(t):
+    print("=" * 100)
+    print(t)
+
+
+def get(url, headers, ctx=None, raw=False):
+    h = {"User-Agent": UA, "Accept-Language": "zh-CN,zh;q=0.9"}
+    h.update(headers)
+    with urllib.request.urlopen(urllib.request.Request(url, headers=h), timeout=30, context=ctx) as r:
+        body = r.read()
+        return (r, body) if raw else json.loads(body.decode("utf-8", "replace"))
+
+
+def safe(fn):
     try:
-        with urllib.request.urlopen(urllib.request.Request(url, headers=SW), timeout=40, context=ctx) as r:
-            j = json.loads(r.read().decode("utf-8", "replace"))
+        fn()
     except urllib.error.HTTPError as e:
-        body = e.read().decode("utf-8", "replace")[:250]
-        print(f"  {label}: ❌ HTTP {e.code} {body!r}")
-        return None
+        print(f"  ❌ HTTP {e.code}")
     except Exception as e:
-        print(f"  {label}: ❌ {type(e).__name__}: {str(e)[:200]}")
-        return None
-    d = j.get("data") if isinstance(j, dict) else None
-    rows = d.get("results") if isinstance(d, dict) and isinstance(d.get("results"), list) else (d if isinstance(d, list) else [])
-    cnt = d.get("count") if isinstance(d, dict) else None
-    print(f"  {label}: ✅ {len(rows)} rows, count {cnt}")
-    if rows:
-        print(f"      fields: {list(rows[0].keys())}")
-        print(f"      first: {json.dumps(rows[0], ensure_ascii=False)[:400]}")
-    return {"rows": rows, "count": cnt}
+        print(f"  ❌ {type(e).__name__}: {str(e)[:200]}")
+
+
+def em_boards():
+    for fs in ("m:90+t:2", "m:90+t:2+f:!50", "m:90+t:3", "m:90+s:4", "m:90+t:1"):
+        def run(fs=fs):
+            url = (f"https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=100&po=1&np=1&fltt=2&invt=2&fid=f20&fs={fs}"
+                   f"&fields=f12,f13,f14,f3,f20,f104,f105&ut={UT}")
+            d = get(url, EM).get("data") or {}
+            diff = d.get("diff") or []
+            print(f"  fs={fs}: total {d.get('total')}; largest by market cap: {[(r.get('f12'), r.get('f14')) for r in diff[:12]]}")
+        safe(run)
+
+
+def sw_current(ctx, label):
+    q = urllib.parse.urlencode({"page": 1, "page_size": 50, "indextype": "一级行业"})
+    r, body = get(f"https://www.swsresearch.com/institute-sw/api/index_publish/current/?{q}",
+                  {"Referer": "https://www.swsresearch.com/institute_sw/allIndex/releasedIndex", "Accept": "application/json",
+                   "Origin": "https://example.github.io"}, ctx, raw=True)
+    j = json.loads(body.decode("utf-8", "replace"))
+    rows = ((j.get("data") or {}).get("results")) or []
+    hdr = {k: r.headers.get(k) for k in ("Access-Control-Allow-Origin", "Cache-Control", "Date", "Last-Modified")}
+    print(f"  [{label} {now()}] {len(rows)} rows; headers {hdr}")
+    for x in rows[:3]:
+        print(f"    {json.dumps(x, ensure_ascii=False)}")
+    return {x.get("swindexcode"): x for x in rows}
+
+
+def sina():
+    for codes in ("sw1_801010,sw1_801120", "sw2_801010", "s_sh801010"):
+        def run(codes=codes):
+            r, body = get(f"https://hq.sinajs.cn/list={codes}", {"Referer": "https://finance.sina.com.cn/"}, raw=True)
+            print(f"  sina {codes}: {body.decode('gbk', 'replace')[:300]!r}")
+        safe(run)
 
 
 def main():
-    print(f"Probe 5c at {NOW.strftime('%Y-%m-%d %H:%M')} Beijing\n")
-    print("=" * 100)
-    print("A) Verified connection")
-    ctx = verified_context()
-    d = NOW.date() - timedelta(days=1)
-    while d.weekday() >= 5:
-        d -= timedelta(days=1)
-    dash, plain = d.isoformat(), d.strftime("%Y%m%d")
-    print("=" * 100)
-    print(f"B) One day ({dash}), all level-1 industries — request variants")
-    base = {"page": 1, "page_size": 50, "index_type": "一级行业", "type": "DAY", "swindexcode": "all"}
-    ok = None
-    for label, extra in [("dates YYYY-MM-DD", {"start_date": dash, "end_date": dash}),
-                         ("dates YYYYMMDD", {"start_date": plain, "end_date": plain}),
-                         ("dates YYYY-MM-DD, index_type 市场表征", {"start_date": dash, "end_date": dash, "index_type": "市场表征"}),
-                         ("no swindexcode", {"start_date": dash, "end_date": dash, "swindexcode": None})]:
-        p = {**base, **extra}
-        p = {k: v for k, v in p.items() if v is not None}
-        r = call(ctx, label, p)
-        if r and r["rows"] and ok is None and "一级行业" == p.get("index_type"):
-            ok = p
-    print("=" * 100)
-    print("C) History depth for one industry (801120 食品饮料), daily")
-    if ok:
-        p = {**ok, "swindexcode": "801120", "start_date": "2000-01-01" if "-" in ok["start_date"] else "20000101",
-             "end_date": dash if "-" in ok["start_date"] else plain}
-        r = call(ctx, "801120 since 2000, page 1", p)
-        if r and r["count"]:
-            last = (int(r["count"]) + 49) // 50
-            r2 = call(ctx, f"801120 since 2000, last page {last}", {**p, "page": last})
-            for rr, name in ((r, "page 1"), (r2, "last page")):
-                if rr and rr["rows"]:
-                    ds = sorted(str(x.get("bargaindate")) for x in rr["rows"])
-                    print(f"      {name} dates: {ds[0]} … {ds[-1]}")
-        print("  page_size 500?")
-        call(ctx, "801120 since 2000, page_size 500", {**p, "page_size": 500})
-    else:
-        print("  (skipped: no working variant in B)")
+    print(f"Probe 6 at {datetime.now(BJ).strftime('%Y-%m-%d %H:%M')} Beijing (should be during trading hours)\n")
+    section("A) Eastmoney live board lists: how many boards, which levels")
+    em_boards()
+    section("B) 申万 current values: do they change during trading? does the site allow a browser to read them (CORS)?")
+    try:
+        raw = urllib.request.urlopen(urllib.request.Request(SW_AIA, headers={"User-Agent": UA}), timeout=20).read()
+        pem = raw.decode() if b"BEGIN CERTIFICATE" in raw else ssl.DER_cert_to_PEM_cert(raw)
+        ctx = ssl.create_default_context()
+        ctx.load_verify_locations(cadata=pem)
+        a = sw_current(ctx, "first")
+        time.sleep(90)
+        b = sw_current(ctx, "90 s later")
+        changed = [c for c in a if c in b and json.dumps(a[c], sort_keys=True) != json.dumps(b[c], sort_keys=True)]
+        print(f"  industries whose values changed in 90 s: {len(changed)} of {len(a)}")
+    except Exception as e:
+        print(f"  ❌ {type(e).__name__}: {str(e)[:200]}")
+    section("C) Sina: 申万 index quote candidates")
+    sina()
     print("=" * 100)
     print("Done. Please paste this whole log into the chat.")
 
