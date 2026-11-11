@@ -59,7 +59,7 @@ BJ = timezone(timedelta(hours=8))
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/124.0 Safari/537.36")
 
-RELAY_VERSION = "v15"               # printed first in the log, so the Actions log shows which script ran
+RELAY_VERSION = "v15.1"               # printed first in the log, so the Actions log shows which script ran
 ERP_INDEX = "000906"                 # 中证800 (the default, published as "erp")
 ERP_OTHERS = [("000300", "沪深300"), ("000905", "中证500"), ("000852", "中证1000"), ("000985", "中证全指")]
 ERP_HISTORY_YEARS = 20               # requested history for ERP indices (CSI returns what it has)
@@ -1233,6 +1233,7 @@ SW_HEADERS = {"Referer": "https://www.swsresearch.com/institute_sw/allIndex/anal
 SW_AIA = "http://cacerts.digicert.cn/GeoTrustG2TLSCNRSA4096SHA2562022CA1.crt"
 SW_SINCE = "2000-01-01"
 SW_PAGE = 500
+SW_BACKFILL_PAGES = (5000, 500)      # try big pages first (count-verified), fall back if the server caps or refuses
 SW_CLASS = "申万一级（2021 版）"
 _SW_CTX = []
 
@@ -1319,30 +1320,49 @@ def sw_update(today):
     known = [max(hist[c]) for c in inds if inds[c].get("backfilled") and hist.get(c)]
     start = (d_of(min(known)) + timedelta(days=1)).isoformat() if known else (today - timedelta(days=14)).isoformat()
     page, pages, newest, latest_dp = 1, 1, None, {}
-    while page <= min(pages, 20):
-        rows, count = sw_rows({"page": page, "page_size": SW_PAGE, "index_type": "一级行业", "start_date": start,
-                               "end_date": today.isoformat(), "type": "DAY", "swindexcode": "all"})
-        pages = max(1, (count + SW_PAGE - 1) // SW_PAGE)
-        for code, name, day, pe, pb, dp in rows:
-            inds.setdefault(code, {"name": name, "backfilled": None})["name"] = name
-            newest = max(newest or day, day)
-            if inds[code].get("backfilled") and day not in hist[code]:
-                hist[code][day] = (pe, pb, dp)
-                touched.add(day[:7])
-        page += 1
-        pause()
+    update_error = None
+    stored_newest = max((max(d) for d in hist.values() if d), default=None)
+    try:
+        while page <= min(pages, 20):
+            rows, count = sw_rows({"page": page, "page_size": SW_PAGE, "index_type": "一级行业", "start_date": start,
+                                   "end_date": today.isoformat(), "type": "DAY", "swindexcode": "all"})
+            pages = max(1, (count + SW_PAGE - 1) // SW_PAGE)
+            for code, name, day, pe, pb, dp in rows:
+                inds.setdefault(code, {"name": name, "backfilled": None})["name"] = name
+                newest = max(newest or day, day)
+                if inds[code].get("backfilled") and day not in hist[code]:
+                    hist[code][day] = (pe, pb, dp)
+                    touched.add(day[:7])
+            page += 1
+            pause()
+    except Exception as e:                      # 申万 is occasionally slow: carry on with what is stored
+        update_error = f"{type(e).__name__}: {e}"[:200]
+        log(f"申万: new-days request failed ({update_error}); continuing with the stored history")
+    newest = max(x for x in (newest, stored_newest) if x) if (newest or stored_newest) else None
     log(f"申万: newest day {newest}, {len(inds)} industries; {len(touched)} months updated")
-    done_now = 0
+    done_now, sizes, failures = 0, list(SW_BACKFILL_PAGES), 0
     for code in sorted(c for c in inds if not inds[c].get("backfilled")):
-        if time_left() < 60:
+        if time_left() < 60 or failures >= 3:
             break
         try:
             got, page, pages, expected = {}, 1, 1, None
+            size = sizes[0]
             while page <= min(pages, 40):
-                rows, count = sw_rows({"page": page, "page_size": SW_PAGE, "index_type": "一级行业", "start_date": SW_SINCE,
-                                       "end_date": today.isoformat(), "type": "DAY", "swindexcode": code})
+                try:
+                    rows, count = sw_rows({"page": page, "page_size": size, "index_type": "一级行业", "start_date": SW_SINCE,
+                                           "end_date": today.isoformat(), "type": "DAY", "swindexcode": code})
+                except Exception as e:
+                    if len(sizes) > 1 and page == 1:      # big page refused: use the small size from now on
+                        log(f"  申万 page size {sizes[0]} not usable ({type(e).__name__}); using {sizes[1]}")
+                        sizes.pop(0); size = sizes[0]
+                        continue
+                    raise
+                if page == 1 and len(sizes) > 1 and len(rows) < min(size, count):
+                    log(f"  申万 page size {size} capped at {len(rows)}; using {sizes[1]}")
+                    sizes.pop(0); size = sizes[0]; got = {}
+                    continue
                 expected = count if expected is None else expected
-                pages = max(1, (count + SW_PAGE - 1) // SW_PAGE)
+                pages = max(1, (count + size - 1) // size)
                 for c, _, day, pe, pb, dp in rows:
                     if c == code:
                         got[day] = (pe, pb, dp)
@@ -1355,23 +1375,25 @@ def sw_update(today):
             inds[code]["backfilled"] = max(got)
             done_now += 1
             sw_save(hist, inds, {d[:7] for d in got})              # progress kept even if the run is stopped later
-            log(f"  申万 backfilled {code} {inds[code]['name']}: {len(got)} days from {min(got)}")
+            failures = 0
+            log(f"  申万 backfilled {code} {inds[code]['name']}: {len(got)} days from {min(got)} (page size {size})")
         except Exception as e:
+            failures += 1
             log(f"  申万 backfill {code} failed: {type(e).__name__}: {e}")
     sw_save(hist, inds, touched)
     remaining = sum(1 for c in inds if not inds[c].get("backfilled"))
     log(f"申万: backfilled {done_now} industries this run; {remaining} still to do")
-    return hist, inds, newest, remaining
+    return hist, inds, newest, remaining, update_error
 
 
 def run_sw_industries(closes, today):
-    hist, inds, newest, remaining = sw_update(today)
+    hist, inds, newest, remaining, update_error = sw_update(today)
     total = len(inds)
     if not total:
-        raise RuntimeError("申万: no industries returned")
+        raise RuntimeError(update_error or "申万: no industries returned")
     if remaining and (total - remaining) < 0.9 * total:
         return {"status": "backfilling", "date": newest, "boards_total": total, "boards_done": total - remaining,
-                "classification": SW_CLASS}
+                "classification": SW_CLASS, "update_error": update_error}
     pepb = {c: {d: (v[0], v[1]) for d, v in days.items()} for c, days in hist.items()}
     boards = {c: {"name": v["name"], "backfilled": v.get("backfilled")} for c, v in inds.items()}
     b = industry_block(pepb, boards, {}, newest, closes)
@@ -1380,7 +1402,7 @@ def run_sw_industries(closes, today):
         row["dp"] = dp
         row.pop("num", None); row.pop("loss", None)
     b.update(status="ok", boards_pending=remaining, classification=SW_CLASS, source="申万宏源研究（市盈率、市净率、股息率）",
-             history_from=min(min(d) for d in hist.values() if d))
+             history_from=min(min(d) for d in hist.values() if d), update_error=update_error)
     log(f"申万 industries: {b['date']} {b['count']}/{b['total']} undervalued ({b['share']}%), "
         f"count percentile {b['count_pct']}% → {b['verdict']}")
     return b
@@ -1462,11 +1484,15 @@ def main():
         closes = {ymd(str(s[0])): s[2] for s in previous["erp"].get("series", []) if s[2] is not None}
     try:
         market["industries"] = run_sw_industries(closes, today) if INDUSTRY_SOURCE == "sw" else run_industries(closes)
+        if market["industries"] and market["industries"].get("update_error"):
+            market["industries_error"] = market["industries"].pop("update_error")    # shown as "这次未更新"
+        elif market["industries"]:
+            market["industries"].pop("update_error", None)
         ok_any = True
     except Exception as e:
         log(f"Industries failed: {type(e).__name__}: {e}")
         prev = previous.get("industries")
-        market["industries"] = prev if prev and prev.get("status") == "ok" else None
+        market["industries"] = prev if prev and prev.get("status") in ("ok", "backfilling") else None
         market["industries_error"] = f"{type(e).__name__}: {e}"[:200]
 
     if market.get("erp") or market.get("industries") or market.get("fear_greed"):
