@@ -35,6 +35,7 @@ Local test without network:  python fetch_market.py --from-dir samples/   (see t
 """
 import bisect
 import io
+import ssl
 import math
 import zipfile
 import collections
@@ -58,7 +59,7 @@ BJ = timezone(timedelta(hours=8))
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/124.0 Safari/537.36")
 
-RELAY_VERSION = "v14.5"               # printed first in the log, so the Actions log shows which script ran
+RELAY_VERSION = "v15"               # printed first in the log, so the Actions log shows which script ran
 ERP_INDEX = "000906"                 # 中证800 (the default, published as "erp")
 ERP_OTHERS = [("000300", "沪深300"), ("000905", "中证500"), ("000852", "中证1000"), ("000985", "中证全指")]
 ERP_HISTORY_YEARS = 20               # requested history for ERP indices (CSI returns what it has)
@@ -125,7 +126,7 @@ def _sample_lookup(url):
         return json.load(f)
 
 
-def get_json(url, headers, attempts=2, timeout=40):
+def get_json(url, headers, attempts=2, timeout=40, context=None):
     if SAMPLE_DIR:
         return _sample_lookup(url)
     h = {"User-Agent": UA, "Accept-Language": "zh-CN,zh;q=0.9"}
@@ -133,7 +134,7 @@ def get_json(url, headers, attempts=2, timeout=40):
     last = None
     for i in range(attempts):
         try:
-            with urllib.request.urlopen(urllib.request.Request(url, headers=h), timeout=timeout) as r:
+            with urllib.request.urlopen(urllib.request.Request(url, headers=h), timeout=timeout, context=context) as r:
                 return json.loads(r.read().decode("utf-8", errors="replace"))
         except urllib.error.HTTPError as e:
             last = e
@@ -1222,6 +1223,169 @@ def industry_block(hist, boards, latest_info, newest, closes):
             "boards": latest_rows, "series": series}
 
 
+# ---------------------------------------------------------------- 3b) 申万一级行业 (default industry source)
+# 申万宏源研究 publishes daily PE / PB / dividend yield for its indices since 2000. Its server sends only its own
+# certificate; the missing intermediate is fetched from the certificate's AIA address and added to a normal,
+# fully verifying TLS context (probe 5b). Dates must be YYYY-MM-DD (YYYYMMDD → HTTP 500, probe 5c).
+INDUSTRY_SOURCE = os.environ.get("MARKET_INDUSTRY_SOURCE", "sw")      # "sw" (申万一级) or "em" (东方财富行业板块)
+SW_URL = "https://www.swsresearch.com/institute-sw/api/index_analysis/index_analysis_report/"
+SW_HEADERS = {"Referer": "https://www.swsresearch.com/institute_sw/allIndex/analysisIndex", "Accept": "application/json"}
+SW_AIA = "http://cacerts.digicert.cn/GeoTrustG2TLSCNRSA4096SHA2562022CA1.crt"
+SW_SINCE = "2000-01-01"
+SW_PAGE = 500
+SW_CLASS = "申万一级（2021 版）"
+_SW_CTX = []
+
+
+def sw_dir():
+    return os.path.join(DATA_DIR, "history", "sw")
+
+
+def sw_context():
+    """Verified TLS context for www.swsresearch.com: system roots + the intermediate certificate (downloaded from
+    the AIA address; a copy is kept in the repository in case that download fails)."""
+    if SAMPLE_DIR:
+        return None
+    if _SW_CTX:
+        return _SW_CTX[0]
+    saved = os.path.join(sw_dir(), "intermediate.pem")
+    pem = None
+    try:
+        with urllib.request.urlopen(urllib.request.Request(SW_AIA, headers={"User-Agent": UA}), timeout=20) as r:
+            raw = r.read()
+        pem = raw.decode() if b"BEGIN CERTIFICATE" in raw else ssl.DER_cert_to_PEM_cert(raw)
+        os.makedirs(sw_dir(), exist_ok=True)
+        if not os.path.exists(saved) or open(saved, encoding="utf-8").read() != pem:
+            with open(saved, "w", encoding="utf-8") as f:
+                f.write(pem)
+    except Exception as e:
+        log(f"  申万: intermediate certificate download failed ({type(e).__name__}: {e}); using the saved copy")
+        if os.path.exists(saved):
+            pem = open(saved, encoding="utf-8").read()
+    ctx = ssl.create_default_context()
+    if pem:
+        ctx.load_verify_locations(cadata=pem)
+    _SW_CTX.append(ctx)
+    return ctx
+
+
+def sw_rows(params):
+    """One page → ([(code, name, date, pe, pb, dp)], count)."""
+    j = get_json(SW_URL + "?" + urllib.parse.urlencode(params), SW_HEADERS, attempts=3, timeout=30, context=sw_context())
+    d = j.get("data") if isinstance(j, dict) else None
+    rows = d.get("results") if isinstance(d, dict) else None
+    if not isinstance(rows, list):
+        raise RuntimeError(f"unexpected reply: {json.dumps(j, ensure_ascii=False)[:200]}")
+    out = []
+    for r in rows:
+        day = ymd(str(r.get("bargaindate") or "")[:10])
+        code = str(r.get("swindexcode") or "")
+        if day and re.fullmatch(r"80\d{4}", code):
+            out.append((code, str(r.get("swindexname") or code)[:8], day, num(r.get("pe")), num(r.get("pb")), num(r.get("dp"))))
+    return out, int(d.get("count") or 0)
+
+
+def sw_load():
+    st = read_json(os.path.join(sw_dir(), "industries.json"), {}) or {}
+    hist = collections.defaultdict(dict)
+    if os.path.isdir(sw_dir()):
+        for fn in sorted(os.listdir(sw_dir())):
+            m = re.fullmatch(r"(\d{4}-\d{2})\.json", fn)
+            if m:
+                for code, rows in ((read_json(os.path.join(sw_dir(), fn), {}) or {}).get("rows") or {}).items():
+                    for day, pe, pb, dp in rows:
+                        hist[code][f"{m.group(1)}-{int(day):02d}"] = (pe, pb, dp)
+    return hist, st.get("industries", {})
+
+
+def sw_save(hist, inds, months):
+    by_month = collections.defaultdict(lambda: collections.defaultdict(list))
+    for code, days in hist.items():
+        for d in sorted(days):
+            if d[:7] in months:
+                by_month[d[:7]][code].append([int(d[8:]), *days[d]])
+    for month in sorted(months):
+        rows = {c: by_month[month][c] for c in sorted(by_month[month])}
+        if rows:
+            write_if_changed(os.path.join(sw_dir(), f"{month}.json"), {"month": month, "rows": rows}, ignore=())
+    write_if_changed(os.path.join(sw_dir(), "industries.json"),
+                     {"note": f"{SW_CLASS} list and backfill state for fetch_market.py", "industries": inds}, ignore=())
+
+
+def sw_update(today):
+    """New days for all industries (one request per 500 rows), then whole histories for industries without one."""
+    hist, inds = sw_load()
+    touched = set()
+    known = [max(hist[c]) for c in inds if inds[c].get("backfilled") and hist.get(c)]
+    start = (d_of(min(known)) + timedelta(days=1)).isoformat() if known else (today - timedelta(days=14)).isoformat()
+    page, pages, newest, latest_dp = 1, 1, None, {}
+    while page <= min(pages, 20):
+        rows, count = sw_rows({"page": page, "page_size": SW_PAGE, "index_type": "一级行业", "start_date": start,
+                               "end_date": today.isoformat(), "type": "DAY", "swindexcode": "all"})
+        pages = max(1, (count + SW_PAGE - 1) // SW_PAGE)
+        for code, name, day, pe, pb, dp in rows:
+            inds.setdefault(code, {"name": name, "backfilled": None})["name"] = name
+            newest = max(newest or day, day)
+            if inds[code].get("backfilled") and day not in hist[code]:
+                hist[code][day] = (pe, pb, dp)
+                touched.add(day[:7])
+        page += 1
+        pause()
+    log(f"申万: newest day {newest}, {len(inds)} industries; {len(touched)} months updated")
+    done_now = 0
+    for code in sorted(c for c in inds if not inds[c].get("backfilled")):
+        if time_left() < 60:
+            break
+        try:
+            got, page, pages, expected = {}, 1, 1, None
+            while page <= min(pages, 40):
+                rows, count = sw_rows({"page": page, "page_size": SW_PAGE, "index_type": "一级行业", "start_date": SW_SINCE,
+                                       "end_date": today.isoformat(), "type": "DAY", "swindexcode": code})
+                expected = count if expected is None else expected
+                pages = max(1, (count + SW_PAGE - 1) // SW_PAGE)
+                for c, _, day, pe, pb, dp in rows:
+                    if c == code:
+                        got[day] = (pe, pb, dp)
+                page += 1
+                pause()
+            if not got or (expected and len(got) < 0.98 * expected):
+                raise RuntimeError(f"incomplete: {len(got)} of {expected} days")
+            hist[code].update(got)
+            touched.update(d[:7] for d in got)
+            inds[code]["backfilled"] = max(got)
+            done_now += 1
+            sw_save(hist, inds, {d[:7] for d in got})              # progress kept even if the run is stopped later
+            log(f"  申万 backfilled {code} {inds[code]['name']}: {len(got)} days from {min(got)}")
+        except Exception as e:
+            log(f"  申万 backfill {code} failed: {type(e).__name__}: {e}")
+    sw_save(hist, inds, touched)
+    remaining = sum(1 for c in inds if not inds[c].get("backfilled"))
+    log(f"申万: backfilled {done_now} industries this run; {remaining} still to do")
+    return hist, inds, newest, remaining
+
+
+def run_sw_industries(closes, today):
+    hist, inds, newest, remaining = sw_update(today)
+    total = len(inds)
+    if not total:
+        raise RuntimeError("申万: no industries returned")
+    if remaining and (total - remaining) < 0.9 * total:
+        return {"status": "backfilling", "date": newest, "boards_total": total, "boards_done": total - remaining,
+                "classification": SW_CLASS}
+    pepb = {c: {d: (v[0], v[1]) for d, v in days.items()} for c, days in hist.items()}
+    boards = {c: {"name": v["name"], "backfilled": v.get("backfilled")} for c, v in inds.items()}
+    b = industry_block(pepb, boards, {}, newest, closes)
+    for row in b["boards"]:
+        dp = hist[row["code"]].get(newest, (None, None, None))[2]
+        row["dp"] = dp
+        row.pop("num", None); row.pop("loss", None)
+    b.update(status="ok", boards_pending=remaining, classification=SW_CLASS, source="申万宏源研究（市盈率、市净率、股息率）",
+             history_from=min(min(d) for d in hist.values() if d))
+    log(f"申万 industries: {b['date']} {b['count']}/{b['total']} undervalued ({b['share']}%), "
+        f"count percentile {b['count_pct']}% → {b['verdict']}")
+    return b
+
+
 def run_industries(closes):
     hist, boards = load_industry_history()
     touched, latest_info, newest, remaining = update_industries(hist, boards)
@@ -1260,7 +1424,8 @@ def main():
     previous = read_json(MARKET_OUT, {}) or {}
     market = {"schema": 1, "fetched_at_beijing": now_text,
               "sources": {"erp": "中证指数官网（中证800 滚动市盈率）+ 东方财富（中国10年期国债收益率）",
-                          "industries": "东方财富行业估值（东方财富行业板块 PE TTM / PB MRQ）",
+                          "industries": ("申万宏源研究（申万一级行业 市盈率 / 市净率 / 股息率）" if INDUSTRY_SOURCE == "sw"
+                                         else "东方财富行业估值（东方财富行业板块 PE TTM / PB MRQ）"),
                           "fear_greed": "中证指数官网（沪深300、中证全指、债券指数）+ 东方财富（融资融券交易统计）"}}
     ok_any = False
 
@@ -1296,7 +1461,7 @@ def main():
     if not closes and previous.get("erp"):
         closes = {ymd(str(s[0])): s[2] for s in previous["erp"].get("series", []) if s[2] is not None}
     try:
-        market["industries"] = run_industries(closes)
+        market["industries"] = run_sw_industries(closes, today) if INDUSTRY_SOURCE == "sw" else run_industries(closes)
         ok_any = True
     except Exception as e:
         log(f"Industries failed: {type(e).__name__}: {e}")
