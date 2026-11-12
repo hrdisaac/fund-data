@@ -59,7 +59,7 @@ BJ = timezone(timedelta(hours=8))
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/124.0 Safari/537.36")
 
-RELAY_VERSION = "v15.1"               # printed first in the log, so the Actions log shows which script ran
+RELAY_VERSION = "v15.2"               # printed first in the log, so the Actions log shows which script ran
 ERP_INDEX = "000906"                 # 中证800 (the default, published as "erp")
 ERP_OTHERS = [("000300", "沪深300"), ("000905", "中证500"), ("000852", "中证1000"), ("000985", "中证全指")]
 ERP_HISTORY_YEARS = 20               # requested history for ERP indices (CSI returns what it has)
@@ -1271,7 +1271,7 @@ def sw_context():
 
 
 def sw_rows(params):
-    """One page → ([(code, name, date, pe, pb, dp)], count)."""
+    """One page → ([(code, name, date, pe, pb, dp, close, amount)], count). close/amount since v15.2 (signals)."""
     j = get_json(SW_URL + "?" + urllib.parse.urlencode(params), SW_HEADERS, attempts=3, timeout=30, context=sw_context())
     d = j.get("data") if isinstance(j, dict) else None
     rows = d.get("results") if isinstance(d, dict) else None
@@ -1282,7 +1282,8 @@ def sw_rows(params):
         day = ymd(str(r.get("bargaindate") or "")[:10])
         code = str(r.get("swindexcode") or "")
         if day and re.fullmatch(r"80\d{4}", code):
-            out.append((code, str(r.get("swindexname") or code)[:8], day, num(r.get("pe")), num(r.get("pb")), num(r.get("dp"))))
+            out.append((code, str(r.get("swindexname") or code)[:8], day, num(r.get("pe")), num(r.get("pb")), num(r.get("dp")),
+                        num(r.get("closeindex")), num(r.get("bargainamount"))))
     return out, int(d.get("count") or 0)
 
 
@@ -1294,8 +1295,9 @@ def sw_load():
             m = re.fullmatch(r"(\d{4}-\d{2})\.json", fn)
             if m:
                 for code, rows in ((read_json(os.path.join(sw_dir(), fn), {}) or {}).get("rows") or {}).items():
-                    for day, pe, pb, dp in rows:
-                        hist[code][f"{m.group(1)}-{int(day):02d}"] = (pe, pb, dp)
+                    for row in rows:                       # [day, pe, pb, dp] (≤ v15.1) or [day, pe, pb, dp, close, amount]
+                        v = (list(row[1:6]) + [None] * 5)[:5]
+                        hist[code][f"{m.group(1)}-{int(row[0]):02d}"] = tuple(v)
     return hist, st.get("industries", {})
 
 
@@ -1327,11 +1329,12 @@ def sw_update(today):
             rows, count = sw_rows({"page": page, "page_size": SW_PAGE, "index_type": "一级行业", "start_date": start,
                                    "end_date": today.isoformat(), "type": "DAY", "swindexcode": "all"})
             pages = max(1, (count + SW_PAGE - 1) // SW_PAGE)
-            for code, name, day, pe, pb, dp in rows:
+            for code, name, day, pe, pb, dp, close, amount in rows:
                 inds.setdefault(code, {"name": name, "backfilled": None})["name"] = name
                 newest = max(newest or day, day)
-                if inds[code].get("backfilled") and day not in hist[code]:
-                    hist[code][day] = (pe, pb, dp)
+                old = hist[code].get(day) if code in hist else None
+                if inds[code].get("backfilled") and (old is None or (old[3] is None and close is not None)):
+                    hist[code][day] = (pe, pb, dp, close, amount)
                     touched.add(day[:7])
             page += 1
             pause()
@@ -1341,7 +1344,10 @@ def sw_update(today):
     newest = max(x for x in (newest, stored_newest) if x) if (newest or stored_newest) else None
     log(f"申万: newest day {newest}, {len(inds)} industries; {len(touched)} months updated")
     done_now, sizes, failures = 0, list(SW_BACKFILL_PAGES), 0
-    for code in sorted(c for c in inds if not inds[c].get("backfilled")):
+    # industries without any history first, then those stored before v15.2 without close / amount (one re-download each)
+    todo = sorted(c for c in inds if not inds[c].get("backfilled")) + sorted(c for c in inds if inds[c].get("backfilled") and not inds[c].get("prices"))
+    prices_done = 0
+    for code in todo:
         if time_left() < 60 or failures >= 3:
             break
         try:
@@ -1363,26 +1369,34 @@ def sw_update(today):
                     continue
                 expected = count if expected is None else expected
                 pages = max(1, (count + size - 1) // size)
-                for c, _, day, pe, pb, dp in rows:
+                for c, _, day, pe, pb, dp, close, amount in rows:
                     if c == code:
-                        got[day] = (pe, pb, dp)
+                        got[day] = (pe, pb, dp, close, amount)
                 page += 1
                 pause()
             if not got or (expected and len(got) < 0.98 * expected):
                 raise RuntimeError(f"incomplete: {len(got)} of {expected} days")
+            was_backfilled = bool(inds[code].get("backfilled"))
             hist[code].update(got)
             touched.update(d[:7] for d in got)
-            inds[code]["backfilled"] = max(got)
-            done_now += 1
+            inds[code]["backfilled"] = inds[code].get("backfilled") or max(got)
+            inds[code]["prices"] = max(got)
+            if was_backfilled:
+                prices_done += 1
+            else:
+                done_now += 1
             sw_save(hist, inds, {d[:7] for d in got})              # progress kept even if the run is stopped later
             failures = 0
-            log(f"  申万 backfilled {code} {inds[code]['name']}: {len(got)} days from {min(got)} (page size {size})")
+            log(f"  申万 {'prices re-downloaded' if was_backfilled else 'backfilled'} {code} {inds[code]['name']}: "
+                f"{len(got)} days from {min(got)} (page size {size})")
         except Exception as e:
             failures += 1
             log(f"  申万 backfill {code} failed: {type(e).__name__}: {e}")
     sw_save(hist, inds, touched)
     remaining = sum(1 for c in inds if not inds[c].get("backfilled"))
-    log(f"申万: backfilled {done_now} industries this run; {remaining} still to do")
+    no_prices = sum(1 for c in inds if not inds[c].get("prices"))
+    log(f"申万: backfilled {done_now} industries this run; {remaining} still to do; "
+        f"prices (close, amount) re-downloaded for {prices_done}, {no_prices} still without prices")
     return hist, inds, newest, remaining, update_error
 
 
