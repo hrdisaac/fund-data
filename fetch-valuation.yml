@@ -1,16 +1,21 @@
-# Fetches 蛋卷基金's index valuation table once a day and saves it to data/ in this repository,
-# where the fund viewer can read it. Put this file at:  .github/workflows/fetch-valuation.yml
+# Daily job for the fund viewer's data relay:
+#   1) 蛋卷基金 index valuation table   → data/index_valuation.json   (saved straight away)
+#   2) fund / ETF holdings with weights  → data/holdings.json          (codes listed in funds.txt)
+#   3) market indicators                 → data/csi_valuation.json, data/market.json, data/history/
+#      (CSI index PE for the codes in indices.txt; 股债性价比; 低估行业个数)
+#   4) signal monitor (§8 第一期)       → data/signals.json, data/signals/<code>.json   (needs step 3's 申万 history)
+# File location:  .github/workflows/fetch-valuation.yml
 name: Fetch index valuation
 
 on:
   schedule:
-    # GitHub uses UTC. 14:30 UTC = 22:30 Beijing; 23:30 UTC = 07:30 Beijing (a second chance if the first fails).
+    # GitHub uses UTC. 14:30 UTC = 22:30 Beijing; 23:30 UTC = 07:30 Beijing (second chance if the first run fails).
     - cron: '30 14 * * *'
     - cron: '30 23 * * *'
   workflow_dispatch:        # adds a "Run workflow" button for manual runs
 
 permissions:
-  contents: write           # needed to save the updated data file
+  contents: write           # needed to save the updated data files
 
 concurrency:
   group: fetch-valuation
@@ -19,7 +24,7 @@ concurrency:
 jobs:
   fetch:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 55                 # 5 + 15 + 15 + 12 minutes of steps at most
     steps:
       - uses: actions/checkout@v4
 
@@ -28,16 +33,50 @@ jobs:
           python-version: '3.12'
 
       - name: Fetch and check the valuation data
+        timeout-minutes: 5
         run: python scripts/fetch_valuation.py
 
-      - name: Save the data if it changed
+      - name: Save the valuation data
+        if: always()
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add data/
-          if git diff --cached --quiet; then
-            echo "No changes to save."
-          else
-            git commit -m "Update index valuation $(date -u +%F)"
-            git push
-          fi
+          for f in data/index_valuation.json data/index_valuation_raw.json; do if [ -e "$f" ]; then git add "$f"; fi; done
+          if git diff --cached --quiet; then echo "No valuation changes to save."; else
+            git commit -m "Update index valuation $(date -u +%F)" && git push; fi
+
+      - name: Fetch fund holdings (codes from funds.txt)
+        if: always()
+        timeout-minutes: 15                # the script itself stops starting new codes after 12 minutes
+        run: python scripts/fetch_holdings.py
+
+      - name: Save the holdings data
+        if: always()
+        run: |
+          if [ -e data/holdings.json ]; then git add data/holdings.json; fi
+          if git diff --cached --quiet; then echo "No holdings changes to save."; else
+            git commit -m "Update holdings $(date -u +%F)" && git pull --rebase --quiet && git push; fi
+
+      - name: Fetch market indicators (CSI PE, 股债性价比, 低估行业)
+        if: always()
+        timeout-minutes: 15                # the script itself stops starting new work after 11 minutes
+        run: python scripts/fetch_market.py
+
+      - name: Save the market data
+        if: always()
+        run: |
+          for f in data/csi_valuation.json data/market.json data/history; do if [ -e "$f" ]; then git add "$f"; fi; done
+          if git diff --cached --quiet; then echo "No market changes to save."; else
+            git commit -m "Update market indicators $(date -u +%F)" && git pull --rebase --quiet && git push; fi
+
+      - name: Compute signals (states and plain-language signals)
+        if: always()
+        timeout-minutes: 12                # the script itself stops starting new indices after 8 minutes
+        run: python scripts/fetch_signals.py
+
+      - name: Save the signals
+        if: always()
+        run: |
+          for f in data/signals.json data/signals; do if [ -e "$f" ]; then git add "$f"; fi; done
+          if git diff --cached --quiet; then echo "No signal changes to save."; else
+            git commit -m "Update signals $(date -u +%F)" && git pull --rebase --quiet && git push; fi
