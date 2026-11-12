@@ -26,7 +26,7 @@ from datetime import date, datetime, timedelta
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import fetch_market as fm                                   # noqa: E402  (shared helpers: HTTP, 申万 history, JSON files)
 
-SIGNALS_VERSION = "v1"
+SIGNALS_VERSION = "v1.1"
 RULES = "第一期（2026-11-12 定稿）"
 TIME_BUDGET = float(os.environ.get("SIGNALS_TIME_BUDGET", 8 * 60))
 STARTED = time.monotonic()
@@ -36,6 +36,7 @@ EM_KLINE = ("https://push2his.eastmoney.com/api/qt/stock/kline/get?secid={secid}
 EM_HEADERS = {"Referer": "https://quote.eastmoney.com/"}
 DJ_URL = "https://danjuanfunds.com/djapi/index_eva/{kind}_history/{code}?day=all"
 DJ_HEADERS = {"Referer": "https://danjuanfunds.com/djmodule/value-center", "Accept": "application/json"}
+MAX_GAP_DAYS = 30               # a longer pause between two rows = a hole in the source's history (longest A-share closure ≈ 11 days)
 MAX_EXTRA = 20                  # CSI indices from indices.txt beyond the broad list
 CHART_DAYS = 750                # ≈ 3 years of daily points in each detail file
 
@@ -589,7 +590,22 @@ def r2(x, nd=2):
     return None if x is None else round(x, nd)
 
 
+def last_segment(dates):
+    """Index where the last continuous stretch of the price history starts (and the gap before it, in days)."""
+    for k in range(len(dates) - 1, 0, -1):
+        gap = (fm.d_of(dates[k]) - fm.d_of(dates[k - 1])).days
+        if gap > MAX_GAP_DAYS:
+            return k, gap
+    return 0, 0
+
+
 def build_entry(code, name, group, source, dates, closes, amounts, val_obs, has_pb, val_source):
+    k, gap = last_segment(dates)
+    history_note = ""
+    if k:                                   # moving averages must not bridge a hole: use the last continuous stretch only
+        history_note = f"价格历史在 {dates[k - 1]} 到 {dates[k]} 之间中断（{gap} 天），只用 {dates[k]} 以后的数据"
+        dates, closes, amounts = dates[k:], closes[k:], amounts[k:]
+        val_obs = [o for o in val_obs if o[0] >= dates[0]]
     A = analyze(dates, closes, amounts, val_obs, has_pb)
     i = len(dates) - 1
     if i < 270 or A["trend"][i] is None:
@@ -660,7 +676,7 @@ def build_entry(code, name, group, source, dates, closes, amounts, val_obs, has_
            "hi250": r2(max(closes[max(0, i - 249):i + 1])), "lo250": r2(min(closes[max(0, i - 249):i + 1]))}
     lv = A["level"][i]
     summary = {"code": code, "name": name, "group": group, "source": source, "date": dates[i], "close": r2(closes[i]),
-               "chg": r2((closes[i] / closes[i - 1] - 1) * 100), "history_from": dates[0],
+               "chg": r2((closes[i] / closes[i - 1] - 1) * 100), "history_from": dates[0], "history_note": history_note,
                "level": lv, "words": LEVELS[lv][1], "rank": LEVELS[lv][0], "valuation": val, "trend": trend, "timing": timing,
                "regime": regime, "position": pos, "swing": swing, "ind": ind,
                "reason": reason_text(name, val, trend, timing, pos, swing, lv)}
@@ -739,7 +755,8 @@ def main():
             entries.append(summary)
             log(f"  {code} {summary['name']}: {summary['date']} {summary['words']} — "
                 f"{summary['valuation']['zone'] or summary['valuation'].get('note')} · {summary['trend']['state']} · "
-                f"{summary['regime']['state']}" + (f" · 仓位 {summary['position']['held']:g}%" if summary['position'] else ""))
+                f"{summary['regime']['state']}" + (f" · 仓位 {summary['position']['held']:g}%" if summary['position'] else "")
+                + (f" [{summary['history_note']}]" if summary.get('history_note') else ""))
             if fm.write_if_changed(os.path.join(signals_dir(), f"{code}.json"), detail, ignore=()):
                 written += 1
             return summary
@@ -783,18 +800,24 @@ def main():
         sys.exit(1)
     order = {"宽基": 0, "行业": 1, "自选": 2}
     entries.sort(key=lambda e: (order.get(e.get("group"), 9), e.get("code")))
-    newest = max(e["date"] for e in entries if not e.get("stale"))
+    # sources publish at different times (Eastmoney can be a day ahead of CSI / 申万): the summary date is the date most
+    # indices have; levels are counted for every fresh index at that date or later (older ones are shown, not counted)
+    fresh = [e for e in entries if not e.get("stale")]
+    by_date = {}
+    for e in fresh:
+        by_date[e["date"]] = by_date.get(e["date"], 0) + 1
+    newest = max(by_date, key=lambda d: (by_date[d], d)) if by_date else max(e["date"] for e in entries)
     counts = {}
-    for e in entries:
-        if not e.get("stale") and e["date"] == newest:
+    for e in fresh:
+        if e["date"] >= newest:
             counts[e["level"]] = counts.get(e["level"], 0) + 1
     doc = {"schema": 1, "version": SIGNALS_VERSION, "rules": RULES, "fetched_at_beijing": now.strftime("%Y-%m-%d %H:%M:%S"),
-           "date": newest, "counts": counts, "sw_waiting": len(waiting), "errors": errors,
+           "date": newest, "dates": dict(sorted(by_date.items())), "counts": counts, "sw_waiting": len(waiting), "errors": errors,
            "params": {"zone_edges": ZONE_EDGES, "zone_buffer": ZONE_BUFFER, "bands": BANDS, "base_offset": BASE_OFFSET,
                       "overheat": [OVERHEAT_ON, OVERHEAT_OFF], "step": STEP, "act_min": ACT_MIN, "same_dir_gap": SAME_DIR_GAP},
            "indices": entries}
     saved = fm.write_if_changed(out_path, doc)
-    log(f"Signals: {len(entries)} indices ({len(errors)} failed), newest {newest}, levels {counts}; "
+    log(f"Signals: {len(entries)} indices ({len(errors)} failed), date {newest} (days {dict(sorted(by_date.items()))}), levels {counts}; "
         f"signals.json {'saved' if saved else 'unchanged'}, {written} detail files written; took {time.monotonic() - STARTED:.0f}s")
 
 
