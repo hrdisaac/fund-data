@@ -1,215 +1,92 @@
 #!/usr/bin/env python3
 """
-Probe 7: data sources for the signal monitor (§8 第一期). Any time of day. Read-only, writes nothing.
-Paste it into scripts/probe_sources.py, run "Probe data sources" from the Actions tab, paste the whole log back.
+Probe 8: CSI index-perf stopped at 2026-11-11 (runs of 11-13 00:xx and 11-14 08:00). Read-only, writes nothing.
+Paste into scripts/probe_sources.py, run "Probe data sources" from the Actions tab, paste the whole log back.
 
-  A) CSI index-perf: which of the §8.4 broad indices it serves, and how far back close / PE / amount go
-  B) Eastmoney daily K-lines from GitHub (创业板指, 科创50, 上证指数): does push2his answer a server?
-  C) 申万 index_publish/trend: full price + amount history in one request? same units as index_analysis_report?
-  D) 蛋卷 pe_history / pb_history for indices CSI may not value (创业板指, 科创50, 上证指数)
+  A) CSI index-perf for recent days: last rows, response headers (caching?), with and without a cache-buster
+  B) Eastmoney daily K-lines for the same indices: which secid works, and do close / amount match CSI on common days?
 """
 import json
-import ssl
 import time
-import urllib.error
-import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
 
-PROBE = "Probe 7"
 BJ = timezone(timedelta(hours=8))
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
-UT = "bd1d9ddb04089700cf9c27f6f7426281"
-SW_AIA = "http://cacerts.digicert.cn/GeoTrustG2TLSCNRSA4096SHA2562022CA1.crt"
-SW_HEADERS = {"Referer": "https://www.swsresearch.com/institute_sw/allIndex/releasedIndex", "Accept": "application/json"}
-CSI_HEADERS = {"Referer": "https://www.csindex.com.cn/", "Accept": "application/json"}
+CSI = "https://www.csindex.com.cn/csindex-home/perf/index-perf?indexCode={code}&startDate={s}&endDate={e}"
+EM = ("https://push2his.eastmoney.com/api/qt/stock/kline/get?secid={secid}&ut=bd1d9ddb04089700cf9c27f6f7426281"
+      "&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57&klt=101&fqt=1&beg={s}&end=20500101&lmt=30")
+# CSI code → Eastmoney secid candidates (1. = Shanghai, 0. = Shenzhen, 2. = CSI)
+CODES = {"000300": ["1.000300"], "000001": ["1.000001"], "000905": ["1.000905"], "000852": ["1.000852"],
+         "932000": ["2.932000", "1.932000"], "000510": ["1.000510", "2.000510"], "000906": ["1.000906"],
+         "000985": ["1.000985", "2.000985"], "000688": ["1.000688"], "930743": ["2.930743"], "H30217": ["2.H30217"],
+         "990001": ["2.990001"], "399976": ["0.399976"]}
 
 
-def section(t):
-    print("=" * 100)
-    print(t)
-
-
-def get(url, headers, ctx=None, timeout=45):
+def get(url, headers):
     h = {"User-Agent": UA, "Accept-Language": "zh-CN,zh;q=0.9"}
     h.update(headers)
     t0 = time.monotonic()
-    with urllib.request.urlopen(urllib.request.Request(url, headers=h), timeout=timeout, context=ctx) as r:
-        body = r.read()
-    return json.loads(body.decode("utf-8", "replace")), len(body), time.monotonic() - t0
-
-
-def safe(label, fn):
-    try:
-        fn()
-    except urllib.error.HTTPError as e:
-        print(f"  {label}: ❌ HTTP {e.code}")
-    except Exception as e:
-        print(f"  {label}: ❌ {type(e).__name__}: {str(e)[:200]}")
-    time.sleep(0.8)
-
-
-def first_with(rows, key):
-    for r in rows:
-        v = r.get(key)
-        if v not in (None, "", "-", 0, "0"):
-            return r.get("tradeDate"), v
-    return None, None
-
-
-# ---------------------------------------------------------------- A) CSI
-def csi(code, start):
-    def run():
-        url = (f"https://www.csindex.com.cn/csindex-home/perf/index-perf?indexCode={code}"
-               f"&startDate={start}&endDate={datetime.now(BJ).strftime('%Y%m%d')}")
-        j, size, secs = get(url, CSI_HEADERS)
-        rows = j.get("data") if isinstance(j, dict) else None
-        if not isinstance(rows, list) or not rows:
-            print(f"  {code} from {start}: no rows; reply keys {list(j)[:6] if isinstance(j, dict) else type(j).__name__}; "
-                  f"msg {str(j.get('msg') if isinstance(j, dict) else '')[:80]}")
-            return
-        rows = sorted(rows, key=lambda r: str(r.get("tradeDate")))
-        name = rows[-1].get("indexNameCn")
-        fc, c = first_with(rows, "close")
-        fp, p = first_with(rows, "peg")
-        fa, a = first_with(rows, "tradingValue")
-        last = rows[-1]
-        print(f"  {code} {name} (from {start}): {len(rows)} rows {rows[0].get('tradeDate')}…{last.get('tradeDate')}, "
-              f"{size // 1024} KB in {secs:.1f}s")
-        print(f"      first close {fc} ({c}); first PE {fp} ({p}); first amount {fa} ({a})")
-        print(f"      last row: close {last.get('close')}, PE {last.get('peg')}, amount {last.get('tradingValue')}")
-    safe(code, run)
-
-
-# ---------------------------------------------------------------- B) Eastmoney
-def em_kline(secid):
-    def run():
-        url = (f"https://push2his.eastmoney.com/api/qt/stock/kline/get?secid={secid}&ut={UT}"
-               f"&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57&klt=101&fqt=1"
-               f"&beg=19900101&end=20500101&lmt=10000")
-        j, size, secs = get(url, {"Referer": "https://quote.eastmoney.com/"})
-        d = j.get("data") or {}
-        k = d.get("klines") or []
-        print(f"  {secid} {d.get('name')}: {len(k)} daily bars, {size // 1024} KB in {secs:.1f}s; rc {j.get('rc')}")
-        if k:
-            print(f"      first {k[0]}")
-            print(f"      last  {k[-1]}   (date,open,close,high,low,volume,amount)")
-    safe(secid, run)
-
-
-# ---------------------------------------------------------------- C) 申万
-def sw_ctx():
-    raw = urllib.request.urlopen(urllib.request.Request(SW_AIA, headers={"User-Agent": UA}), timeout=20).read()
-    pem = raw.decode() if b"BEGIN CERTIFICATE" in raw else ssl.DER_cert_to_PEM_cert(raw)
-    ctx = ssl.create_default_context()
-    ctx.load_verify_locations(cadata=pem)
-    return ctx
-
-
-def sw_trend(ctx, code, extra, label):
-    out = {}
-
-    def run():
-        q = urllib.parse.urlencode({"swindexcode": code, "period": "DAY", **extra})
-        j, size, secs = get(f"https://www.swsresearch.com/institute-sw/api/index_publish/trend/?{q}", SW_HEADERS, ctx, 60)
-        rows = j.get("data") if isinstance(j, dict) else None
-        if isinstance(rows, dict):
-            rows = rows.get("results") or rows.get("data") or rows
-        if not isinstance(rows, list) or not rows:
-            print(f"  trend {code} {label}: no rows; reply {json.dumps(j, ensure_ascii=False)[:200]}")
-            return
-        rows = sorted(rows, key=lambda r: str(r.get("bargaindate")))
-        print(f"  trend {code} {label}: {len(rows)} rows {rows[0].get('bargaindate')}…{rows[-1].get('bargaindate')}, "
-              f"{size // 1024} KB in {secs:.1f}s")
-        print(f"      newest row: {json.dumps(rows[-1], ensure_ascii=False)}")
-        for r in rows[-5:]:
-            out[str(r.get("bargaindate"))[:10]] = r
-    safe(f"trend {code} {label}", run)
-    return out
-
-
-def sw_report(ctx, code):
-    out = {}
-
-    def run():
-        today = datetime.now(BJ).date()
-        q = urllib.parse.urlencode({"page": 1, "page_size": 10, "index_type": "一级行业",
-                                    "start_date": (today - timedelta(days=14)).isoformat(), "end_date": today.isoformat(),
-                                    "type": "DAY", "swindexcode": code})
-        j, size, secs = get(f"https://www.swsresearch.com/institute-sw/api/index_analysis/index_analysis_report/?{q}",
-                            SW_HEADERS, ctx, 60)
-        rows = ((j.get("data") or {}).get("results")) or []
-        print(f"  report {code}: {len(rows)} rows in {secs:.1f}s")
-        for r in rows:
-            out[str(r.get("bargaindate"))[:10]] = r
-    safe(f"report {code}", run)
-    return out
-
-
-def sw_compare(trend, report):
-    common = sorted(set(trend) & set(report))
-    if not common:
-        print(f"  compare: no common days (trend {sorted(trend)[-3:]}, report {sorted(report)[-3:]})")
-        return
-    for d in common[-3:]:
-        t, r = trend[d], report[d]
-        print(f"  {d}: close trend {t.get('closeindex')} / report {r.get('closeindex')}; "
-              f"amount trend {t.get('bargainamount')} / report {r.get('bargainamount')}; "
-              f"volume trend {t.get('bargainsum')}")
-
-
-# ---------------------------------------------------------------- D) 蛋卷
-def danjuan(kind, code):
-    def run():
-        j, size, secs = get(f"https://danjuanfunds.com/djapi/index_eva/{kind}_history/{code}?day=all",
-                            {"Referer": "https://danjuanfunds.com/djmodule/value-center", "Accept": "application/json"})
-        d = j.get("data") if isinstance(j, dict) else None
-        lst = None
-        if isinstance(d, dict):
-            for k, v in d.items():
-                if isinstance(v, list) and v and isinstance(v[0], dict):
-                    lst = v
-                    break
-        if not lst:
-            print(f"  {kind} {code}: no list; reply {json.dumps(j, ensure_ascii=False)[:200]}")
-            return
-        ts = sorted(x.get("ts") for x in lst if x.get("ts"))
-        day = lambda t: datetime.fromtimestamp(t / 1000, BJ).strftime("%Y-%m-%d") if t else None
-        print(f"  {kind} {code}: {len(lst)} points {day(ts[0])}…{day(ts[-1])}; newest {json.dumps(lst[-1], ensure_ascii=False)[:160]}")
-    safe(f"{kind} {code}", run)
+    with urllib.request.urlopen(urllib.request.Request(url, headers=h), timeout=40) as r:
+        body, hdr = r.read(), dict(r.headers)
+    return json.loads(body.decode("utf-8", "replace")), hdr, time.monotonic() - t0
 
 
 def main():
-    print(f"{PROBE} at {datetime.now(BJ).strftime('%Y-%m-%d %H:%M')} Beijing\n")
-    section("A) CSI index-perf: broad indices of §8.4 (25-year request; 000300 also asked from 2005 and 2011)")
-    for code in ("000300", "000001", "000688", "932000", "000510", "000016", "399006", "399001"):
-        csi(code, "20010101")
-    csi("000300", "20050101")
-    csi("000300", "20110101")
-
-    section("B) Eastmoney daily K-lines from a GitHub server (push2his)")
-    for secid in ("0.399006", "1.000688", "1.000001", "1.000300"):
-        em_kline(secid)
-
-    section("C) 申万 trend (prices + amount) vs index_analysis_report; units on common days")
-    try:
-        ctx = sw_ctx()
-        t = sw_trend(ctx, "801120", {}, "plain")
-        r = sw_report(ctx, "801120")
-        sw_compare(t, r)
-        sw_trend(ctx, "801120", {"start_date": "2026-10-01", "end_date": datetime.now(BJ).date().isoformat()}, "with dates")
-        t2 = sw_trend(ctx, "801780", {}, "plain")            # 银行: a second industry for the unit check
-        r2 = sw_report(ctx, "801780")
-        sw_compare(t2, r2)
-    except Exception as e:
-        print(f"  ❌ {type(e).__name__}: {str(e)[:200]}")
-
-    section("D) 蛋卷 PE/PB history for indices CSI may not value")
-    for code in ("SZ399006", "SH000688", "SH000001", "SH000300"):
-        danjuan("pe", code)
-        danjuan("pb", code)
+    now = datetime.now(BJ)
+    print(f"Probe 8 at {now.strftime('%Y-%m-%d %H:%M')} Beijing\n")
+    s, e = "20261101", now.strftime("%Y%m%d")
+    csi_last = {}
     print("=" * 100)
-    print(f"{PROBE} done. Please paste this whole log into the chat.")
+    print("A) CSI index-perf, startDate 20261101")
+    for k, code in enumerate(CODES):
+        for bust in ([False, True] if k == 0 else [False]):
+            url = CSI.format(code=code, s=s, e=e) + (f"&_={int(time.time() * 1000)}" if bust else "")
+            try:
+                j, hdr, secs = get(url, {"Referer": "https://www.csindex.com.cn/", "Accept": "application/json"})
+                rows = sorted((r for r in (j.get("data") or []) if isinstance(r, dict)), key=lambda r: str(r.get("tradeDate")))
+                tail = [(r.get("tradeDate"), r.get("close"), r.get("peg"), r.get("tradingValue")) for r in rows[-4:]]
+                print(f"  {code}{' (cache-buster)' if bust else ''}: {len(rows)} rows in {secs:.1f}s, last 4 (date, close, PE, amount): {tail}")
+                if k == 0:
+                    keep = {x: hdr.get(x) for x in ("Date", "Last-Modified", "Age", "Cache-Control", "Expires", "ETag", "X-Cache",
+                                                    "X-Cache-Lookup", "Via", "Server", "CF-Cache-Status") if hdr.get(x)}
+                    print(f"      headers: {keep}")
+                for r in rows:
+                    csi_last.setdefault(code, {})[str(r.get("tradeDate"))] = (r.get("close"), r.get("tradingValue"))
+            except Exception as ex:
+                print(f"  {code}: ❌ {type(ex).__name__}: {str(ex)[:150]}")
+            time.sleep(0.8)
+    print("=" * 100)
+    print("B) Eastmoney daily K for the same indices (last 30 bars from 2026-10-01); ratio = Eastmoney ÷ CSI on common days")
+    for code, cands in CODES.items():
+        for secid in cands:
+            try:
+                j, _, secs = get(EM.format(secid=secid, s="20261001"), {"Referer": "https://quote.eastmoney.com/"})
+                d = j.get("data") or {}
+                k = d.get("klines") or []
+                if not k:
+                    print(f"  {code} via {secid}: no bars (rc {j.get('rc')})")
+                    time.sleep(0.5)
+                    continue
+                last = k[-1].split(",")
+                cmp = []
+                for line in k:
+                    p = line.split(",")
+                    key = p[0].replace("-", "")
+                    if key in csi_last.get(code, {}):
+                        cc, ca = csi_last[code][key]
+                        try:
+                            cmp.append(f"{p[0]} close {float(p[2]) / float(cc):.5f}, amount {float(p[6]) / 1e8 / float(ca):.3f}")
+                        except Exception:
+                            pass
+                print(f"  {code} via {secid} {d.get('name')}: {len(k)} bars, last {last[0]} close {last[2]} amount {float(last[6]) / 1e8:.1f} 亿")
+                print(f"      vs CSI on common days: {cmp[-3:] if cmp else 'none'}")
+                break
+            except Exception as ex:
+                print(f"  {code} via {secid}: ❌ {type(ex).__name__}: {str(ex)[:150]}")
+            time.sleep(0.5)
+    print("=" * 100)
+    print("Probe 8 done. Please paste this whole log into the chat.")
 
 
 if __name__ == "__main__":
