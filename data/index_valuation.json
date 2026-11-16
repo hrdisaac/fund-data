@@ -1,8 +1,8 @@
 {
  "source": "蛋卷基金 index_eva (data from Wind) — personal use",
  "source_url": "https://danjuanfunds.com/djapi/index_eva/dj",
- "fetched_at_utc": "2026-11-14T03:27:03+00:00",
- "fetched_at_beijing": "2026-11-14 11:27:03",
+ "fetched_at_utc": "2026-11-16T02:55:48+00:00",
+ "fetched_at_beijing": "2026-11-16 10:55:48",
  "percent_fields_are": "percent (0–100)",
  "count": 63,
  "fields_seen": [
@@ -203,12 +203,12 @@
   {
    "code": "GDAXI",
    "name": "德国DAX",
-   "pe": 18.601,
-   "pb": 1.776,
-   "pe_pct": 63.0,
-   "pb_pct": 60.64,
-   "roe": 9.55,
-   "dividend_yield": 0.1,
+   "pe": 19.239,
+   "pb": 2.141,
+   "pe_pct": 73.16,
+   "pb_pct": 99.36,
+   "roe": 11.13,
+   "dividend_yield": 2.42,
    "eva_type": "high",
    "date": "11-13"
   },
