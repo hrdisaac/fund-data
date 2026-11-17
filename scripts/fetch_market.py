@@ -59,7 +59,7 @@ BJ = timezone(timedelta(hours=8))
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/124.0 Safari/537.36")
 
-RELAY_VERSION = "v15.2"               # printed first in the log, so the Actions log shows which script ran
+RELAY_VERSION = "v15.3"               # printed first in the log, so the Actions log shows which script ran
 ERP_INDEX = "000906"                 # 中证800 (the default, published as "erp")
 ERP_OTHERS = [("000300", "沪深300"), ("000905", "中证500"), ("000852", "中证1000"), ("000985", "中证全指")]
 ERP_HISTORY_YEARS = 20               # requested history for ERP indices (CSI returns what it has)
@@ -261,6 +261,69 @@ def read_index_codes(path):
 
 
 _CSI_CACHE = {}
+_EM_FILLS = {}                          # code → (CSI's last day, [days added], {day: (close, amount)}) in this run
+NOW = None                              # set by main(); the fill uses it to decide which days have closed
+EM_KLINE = ("https://push2his.eastmoney.com/api/qt/stock/kline/get?secid={secid}&ut=bd1d9ddb04089700cf9c27f6f7426281"
+            "&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57&klt=101&fqt=1&beg={beg}&end=20500101&lmt=60")
+EM_KLINE_HEADERS = {"Referer": "https://quote.eastmoney.com/"}
+FILL_CLOSE_TOL, FILL_AMOUNT_TOL, FILL_MIN_COMMON = 0.0002, 0.01, 3
+
+
+def em_secid(code):
+    """Eastmoney market prefix for a CSI index code (probe 8: 1.000300, 2.932000, 2.990001, 1.000510, 1.000985)."""
+    return ("0." if code.startswith("399") else "1." if code.startswith("000") else "2.") + code
+
+
+def last_closed_day(now):
+    """The latest weekday whose close is final (after 15:30 Beijing today, else the previous weekday)."""
+    d = now.date() if now.hour * 60 + now.minute >= 15 * 60 + 30 else now.date() - timedelta(days=1)
+    while d.weekday() >= 5:
+        d -= timedelta(days=1)
+    return d
+
+
+def em_fill(code, closes, amounts, now=None):
+    """CSI sometimes stops publishing for days (2026-11-12/13). When its last day is before the last closed day, add the
+    missing days' close and amount from Eastmoney's daily K-line — only if Eastmoney agrees with CSI on at least
+    FILL_MIN_COMMON common days (probe 8: identical close and amount in 亿元). Never PE. Returns the days added."""
+    now = now or NOW or datetime.now(BJ)
+    if not closes:
+        return []
+    last, limit = max(closes), last_closed_day(now).isoformat()
+    if last >= limit:
+        return []
+    beg = (d_of(last) - timedelta(days=40)).strftime("%Y%m%d")
+    j = get_json(EM_KLINE.format(secid=em_secid(code), beg=beg), EM_KLINE_HEADERS, attempts=3, timeout=20)
+    em = {}
+    for line in (((j or {}).get("data") or {}).get("klines") or []):
+        p = str(line).split(",")
+        if len(p) >= 7:
+            d, c, a = ymd(p[0]), num(p[2]), num(p[6])
+            if d and c and c > 0:
+                em[d] = (c, a / 1e8 if a and a > 0 else None)
+    common = sorted(d for d in em if d in closes and closes[d])[-5:]
+    if len(common) < FILL_MIN_COMMON:
+        raise RuntimeError(f"only {len(common)} common days with Eastmoney")
+    for d in common:
+        if abs(em[d][0] / closes[d] - 1) > FILL_CLOSE_TOL:
+            raise RuntimeError(f"Eastmoney close differs on {d} ({em[d][0]} vs {closes[d]})")
+        if amounts.get(d) and em[d][1] and abs(em[d][1] / amounts[d] - 1) > FILL_AMOUNT_TOL:
+            raise RuntimeError(f"Eastmoney amount differs on {d} ({em[d][1]:.2f} vs {amounts[d]:.2f})")
+    added = [d for d in sorted(em) if last < d <= limit]
+    for d in added:
+        closes[d] = em[d][0]
+        if em[d][1]:
+            amounts[d] = em[d][1]
+    return added
+
+
+def fill_note(code):
+    """'11-12–11-13 东方财富' for the sources text when this run filled the index, else ''."""
+    f = _EM_FILLS.get(code)
+    if not f or not f[1]:
+        return ""
+    a, b = f[1][0][5:], f[1][-1][5:]                         # MM-DD
+    return f"{a}{'–' + b if b != a else ''} 东方财富"
 
 
 def fetch_csi(code, today, years=YEARS):
@@ -293,6 +356,26 @@ def _fetch_csi(code, today, years):
         a = num(r.get("tradingValue"))
         if a is not None and a > 0:
             amounts[d] = a
+    if code in _EM_FILLS:                                     # filled earlier in this run (another history length)
+        for d, (c, a) in _EM_FILLS[code][2].items():
+            if d not in out:
+                out[d] = (c, None)
+                if a:
+                    amounts[d] = a
+    else:
+        closes = {d: c for d, (c, _) in out.items() if c}
+        csi_last = max(out) if out else None
+        try:
+            added = em_fill(code, closes, amounts)
+            for d in added:
+                out[d] = (closes[d], None)                    # price and amount only: PE stays CSI's
+            if added:
+                log(f"  CSI {code} ends {csi_last}; {added[0]}…{added[-1]} ({len(added)} days) filled from Eastmoney "
+                    f"(close + amount only, matched on common days)")
+            _EM_FILLS[code] = (csi_last, added, {d: (closes[d], amounts.get(d)) for d in added})
+        except Exception as e:
+            _EM_FILLS[code] = (csi_last, [], {})
+            log(f"  CSI {code} ends {csi_last or '--'}; no Eastmoney fill ({type(e).__name__}: {str(e)[:120]})")
     return name, full, sorted((d, c, pe) for d, (c, pe) in out.items()), amounts
 
 
@@ -980,6 +1063,10 @@ def run_fear_greed(today):
         margin = {}
         log(f"  margin data failed: {type(e).__name__}: {e}")
     sources["momentum"] = "沪深300（中证指数官网）"
+    for key, code in (("momentum", FG_STOCK), ("turnover", next((c for c in FG_TURNOVER if c in _EM_FILLS), None))):
+        note = fill_note(code) if code else ""
+        if note and key in sources:
+            sources[key] = sources[key].rstrip("）") + f"；{note}）" if sources[key].endswith("）") else sources[key] + f"（{note}）"
     if_rows = {}
     try:
         if_rows, n_req = update_if_history(today)
@@ -1451,11 +1538,14 @@ def main():
         CSI_OUT = os.path.join(DATA_DIR, "csi_valuation.json")
         MARKET_OUT = os.path.join(DATA_DIR, "market.json")
         IND_DIR = os.path.join(DATA_DIR, "history", "industry")
+    global NOW
     _CSI_CACHE.clear()                                       # the cache is per run
+    _EM_FILLS.clear()
     log(f"fetch_market.py {RELAY_VERSION}")
     now = datetime.now(BJ)
     if os.environ.get("MARKET_TODAY"):                      # tests: pretend it is another day
         now = datetime.fromisoformat(os.environ["MARKET_TODAY"]).replace(tzinfo=BJ)
+    NOW = now
     today, now_text = now.date(), now.strftime("%Y-%m-%d %H:%M:%S")
     previous = read_json(MARKET_OUT, {}) or {}
     market = {"schema": 1, "fetched_at_beijing": now_text,
@@ -1510,6 +1600,13 @@ def main():
         market["industries_error"] = f"{type(e).__name__}: {e}"[:200]
 
     if market.get("erp") or market.get("industries") or market.get("fear_greed"):
+        fills = {c: {"csi_last": f[0], "from": f[1][0], "to": f[1][-1]} for c, f in sorted(_EM_FILLS.items()) if f[1]}
+        if fills:
+            market["csi_fill"] = fills
+        days = [x for x in [(market.get("erp") or {}).get("date"), (market.get("fear_greed") or {}).get("date"),
+                            (market.get("industries") or {}).get("date")] + [f["to"] for f in fills.values()] if isinstance(x, str)]
+        if days:
+            market["latest_day"] = max(days)                   # the app marks parts whose own date is older
         log("market.json: " + ("saved" if write_if_changed(MARKET_OUT, market) else "unchanged"))
     log(f"Market step took {time.monotonic() - STARTED:.0f}s")
     if not ok_any:
