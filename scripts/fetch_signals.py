@@ -27,8 +27,8 @@ from datetime import date, datetime, timedelta
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import fetch_market as fm                                   # noqa: E402  (shared helpers: HTTP, 申万 history, JSON files)
 
-SIGNALS_VERSION = "v1.3"
-RULES = "第一期修订（2026-11-17：仓位随估值平滑变化）"
+SIGNALS_VERSION = "v1.4"
+RULES = "第一期定稿（2026-11-18：v3 分档时机、按波动缩放、行业估值依据）"
 TIME_BUDGET = float(os.environ.get("SIGNALS_TIME_BUDGET", 8 * 60))
 STARTED = time.monotonic()
 CSI_START = "20010101"          # CSI adds a phantom row dated at startDate: 1 January is never a trading day → dropped
@@ -69,6 +69,20 @@ PULLBACK_PCT = 3.0
 CONVERGE_PCT, DIVERGE_PCT = 0.5, 1.5
 SWING_DAYS, SWING_COOLDOWN = 60, 20
 MA_LINES = (20, 51, 120, 250, 850)
+# volatility scaling (agreed 2026-11-18): every price-percentage threshold is in units of the index's own monthly volatility
+# σ_m = std of daily log returns over the last 750 trading days (at least 250) × √20; k = σ_m / SIGMA_REF. SIGMA_REF is
+# 沪深300's σ_m on 2026-11-17 (18.1 % a year), frozen, so 沪深300 keeps the agreed numbers. Without σ_m: k = 1.
+VOL_DAYS, VOL_MIN_DAYS, SIGMA_REF = 750, 250, 5.12
+TRAIL_SIGMA, B2_SIGMA, S3_SIGMA = 1.5, 1.5, 0.5           # multiples of σ_m (not of k)
+B1_BAND_PCT, B3_BREAK_PCT = 2.0, 3.0                       # × k
+# plan v3 (agreed 2026-11-18): valuation sets the target (plan v2); confirmation tiers decide when and how much
+V3_TIER_CAP = {1: 10, 2: 20, 3: 100}                       # tier 3 closes the whole gap
+V3_CALM_DAYS, V3_LOWHIGH_DAYS = 10, 60
+# valuation basis per 申万 industry (agreed 2026-11-17): PB for financials and strong cyclicals, PE for steady / asset-light
+SW_BASIS = {**{c: "pb" for c in ("801780", "801790", "801180", "801040", "801950", "801050", "801030", "801960", "801710", "801010")},
+            **{c: "pe" for c in ("801120", "801150", "801110", "801980", "801210", "801750", "801760", "801080", "801770", "801740")}}
+HK = [("HKHSI", "恒生指数", ["100.HSI"], "HKHSI", "avg"), ("HKHSCEI", "国企指数", ["100.HSCEI", "124.HSCEI"], "HKHSCEI", "avg"),
+      ("HKHSTECH", "恒生科技", ["124.HSTECH", "100.HSTECH"], "HKHSTECH", "pe")]
 
 # event step table (§8.6 step 3): (zone group, trend) → {event: steps}; anything not listed = 0
 EVENT_STEPS = {
@@ -197,30 +211,61 @@ def valuation_pcts(obs):
     return out
 
 
-def combine_valuation(pe, pb, pe_pct, pb_pct, has_pb):
-    """§8.5 ①: PE > 0 → mean of PE and PB percentiles; PE ≤ 0 or missing → PB only; PE-only sources → PE."""
-    if pe is not None and pe > 0 and pe_pct is not None and pb_pct is not None:
+def combine_valuation(pe, pb, pe_pct, pb_pct, basis):
+    """§8.5 ① + industry table: "avg" = mean of PE and PB percentiles (PE ≤ 0 → PB); "pe" = PE (loss → PB);
+    "pb" = PB (no PB → PE); "pe_only" = sources without PB (CSI). Returns (percentile, label)."""
+    pe_ok = pe is not None and pe > 0 and pe_pct is not None
+    if basis == "pe_only":
+        return (pe_pct, "PE") if pe_ok else (None, "")
+    if basis == "pb":
+        if pb_pct is not None:
+            return pb_pct, "PB"
+        return (pe_pct, "PE（无 PB）") if pe_ok else (None, "")
+    if basis == "pe":
+        if pe_ok:
+            return pe_pct, "PE"
+        return (pb_pct, "PB（亏损期只用 PB）") if pb_pct is not None else (None, "")
+    if pe_ok and pb_pct is not None:
         return (pe_pct + pb_pct) / 2, "PE+PB"
-    if pb_pct is not None and (pe is None or pe <= 0 or pe_pct is None):
+    if pb_pct is not None:
         return pb_pct, "PB（亏损期只用 PB）" if pe is not None and pe <= 0 else "PB"
-    if pe_pct is not None and not has_pb:
-        return pe_pct, "PE"
-    return None, ""
+    return (None, "")
 
 
 # ---------------------------------------------------------------- the engine (pure; tests re-compute it independently)
 
-def analyze(dates, closes, amounts, val_obs, has_pb):
-    """dates/closes/amounts: daily price series (amounts may hold None). val_obs: [(date, pe, pb)].
-    Returns per-day arrays and today's detailed state."""
+def monthly_vol(closes):
+    """σ_m per day (%, no look-ahead): std of the last ≤ 750 daily log returns (≥ 250) × √20."""
     n = len(closes)
+    out = [None] * n
+    r = [None] + [math.log(closes[i] / closes[i - 1]) for i in range(1, n)]
+    s1 = s2 = 0.0
+    for i in range(1, n):
+        s1 += r[i]; s2 += r[i] * r[i]
+        if i - VOL_DAYS >= 1:
+            s1 -= r[i - VOL_DAYS]; s2 -= r[i - VOL_DAYS] * r[i - VOL_DAYS]
+        m = min(i, VOL_DAYS)
+        if m >= VOL_MIN_DAYS:
+            var = max(0.0, (s2 - s1 * s1 / m) / (m - 1))
+            out[i] = math.sqrt(var) * math.sqrt(20) * 100
+    return out
+
+
+def analyze(dates, closes, amounts, val_obs, basis):
+    """dates/closes/amounts: daily price series (amounts may hold None). val_obs: [(date, pe, pb)].
+    basis: "pe_only" | "avg" | "pe" | "pb" (True / False = "avg" / "pe_only"). Returns per-day arrays."""
+    basis = "avg" if basis is True else "pe_only" if basis is False else basis
+    n = len(closes)
+    sig = monthly_vol(closes)
+    kf = [x / SIGMA_REF if x else 1.0 for x in sig]          # scale factor per day
     ma = {k: moving_average(closes, k) for k in MA_LINES}
     slope = {}
     for k in (20, 51, 120, 250, 850):
         m = ma[k]
         slope[k] = [None if i < SLOPE_DAYS or m[i] is None or m[i - SLOPE_DAYS] is None else (m[i] / m[i - SLOPE_DAYS] - 1) * 100
                     for i in range(n)]
-    sst = {k: [slope_state(x) for x in v] for k, v in slope.items()}
+    sst = {k: [None if x is None else 1 if x > FLAT_PCT * kf[i] else -1 if x < -FLAT_PCT * kf[i] else 0
+               for i, x in enumerate(v)] for k, v in slope.items()}
     rsi = rsi_wilder(closes)
     dif, dea, hist = macd(closes)
 
@@ -237,7 +282,7 @@ def analyze(dates, closes, amounts, val_obs, has_pb):
         if od not in pcts:
             continue
         _, pe, pb = vmap[od]
-        v, b = combine_valuation(pe, pb, pcts[od][0], pcts[od][1], has_pb)
+        v, b = combine_valuation(pe, pb, pcts[od][0], pcts[od][1], basis)
         vpct[i], vbasis[i], vraw[i] = v, b, (od, pe, pb, pcts[od][0], pcts[od][1])
 
     zone, z = [None] * n, None
@@ -277,7 +322,7 @@ def analyze(dates, closes, amounts, val_obs, has_pb):
         if any(v is None for v in vals):
             return None
         spread = (max(vals) / min(vals) - 1) * 100
-        if spread < GLUE_PCT:
+        if spread < GLUE_PCT * kf[i]:
             return "粘合"
         if vals[0] > vals[1] > vals[2] > vals[3]:
             return "多头排列"
@@ -304,23 +349,22 @@ def analyze(dates, closes, amounts, val_obs, has_pb):
             run_sign, confirmed = sign, False
         if run_start is not None and not confirmed and sign != 0:
             k = i - run_start + 1
-            if CROSS_DAYS <= k <= CROSS_MAX_DAYS and abs(g) >= CROSS_MIN_GAP:
+            if CROSS_DAYS <= k <= CROSS_MAX_DAYS and abs(g) >= CROSS_MIN_GAP * kf[i]:
                 events[i].append("金叉" if sign > 0 else "死叉")
                 confirmed = True
         # 回踩: yesterday dipped below MA20 (within 3 %, not below MA51) in an MA51-up uptrend; today back above MA20
         if i >= 1 and gap[i - 1] is not None and gap[i - 1] > 0 and sst[51][i - 1] == 1:
             c1, m20, m51 = closes[i - 1], ma[20][i - 1], ma[51][i - 1]
-            if c1 < m20 and c1 >= m20 * (1 - PULLBACK_PCT / 100) and c1 >= m51 and closes[i] > ma[20][i]:
+            if c1 < m20 and c1 >= m20 * (1 - PULLBACK_PCT * kf[i - 1] / 100) and c1 >= m51 and closes[i] > ma[20][i]:
                 events[i].append("回踩")
-        if abs(g) <= CONVERGE_PCT:
+        if abs(g) <= CONVERGE_PCT * kf[i]:
             conv = True
-        elif conv and abs(g) >= DIVERGE_PCT:
+        elif conv and abs(g) >= DIVERGE_PCT * kf[i]:
             events[i].append("发散向上" if g > 0 else "发散向下")
             conv = False
 
     P1 = plan_v1(zone, trend, over, events)
     P = plan_v2(zone, trend, over, vpct, events)
-    target, held, action, cause, ev_step = P["target"], P["held"], P["action"], P["cause"], P["ev_step"]
 
     # swing signals (§8.9)
     hi60 = [None] * n
@@ -338,14 +382,14 @@ def analyze(dates, closes, amounts, val_obs, has_pb):
     def cond_b1(i):
         z = zone[i]
         return (z is not None and z <= 2 and trend[i] == "上升" and ma[51][i] is not None and rsi[i] is not None
-                and 0 <= closes[i] / ma[51][i] - 1 <= 0.02 and rsi[i] < 45)
+                and 0 <= closes[i] / ma[51][i] - 1 <= B1_BAND_PCT * kf[i] / 100 and rsi[i] < 45)
     def cond_b3(i):
         z = zone[i]
-        if z is None or z >= 3 or i < 21 or any(spread4[j] is None or spread4[j] >= GLUE_PCT for j in range(i - 20, i)):
+        if z is None or z >= 3 or i < 21 or any(spread4[j] is None or spread4[j] >= GLUE_PCT * kf[j] for j in range(i - 20, i)):
             return False
         top = max(ma[k][i] for k in (20, 51, 120, 250))
         m = amt_mean(i)
-        return closes[i] > top * 1.03 and amt[i] is not None and m is not None and amt[i] >= 1.5 * m
+        return closes[i] > top * (1 + B3_BREAK_PCT * kf[i] / 100) and amt[i] is not None and m is not None and amt[i] >= 1.5 * m
     for i in range(n):
         h = hist[i]
         # MACD positive-run peaks (S2): the previous completed run's peak vs the current one
@@ -377,7 +421,8 @@ def analyze(dates, closes, amounts, val_obs, has_pb):
             swing_today[i].append("B1"); open_tr["B1"] = i
         if "B2" not in open_tr and z <= 1 and ma[20][i] is not None and ma[20][i - 1] is not None \
                 and closes[i] > ma[20][i] and closes[i - 1] <= ma[20][i - 1]:
-            setup = any((j >= 20 and closes[j] / closes[j - 20] - 1 <= -0.08) or (rsi[j] is not None and rsi[j] <= 30)
+            setup = any((j >= 20 and closes[j] / closes[j - 20] - 1 <= -(B2_SIGMA * sig[j] / 100 if sig[j] else 0.08))
+                        or (rsi[j] is not None and rsi[j] <= 30)
                         for j in range(max(0, i - 19), i + 1))
             if setup:
                 swing_today[i].append("B2"); open_tr["B2"] = i
@@ -392,11 +437,15 @@ def analyze(dates, closes, amounts, val_obs, has_pb):
             cur = cur_peak if h > 0 else h
             if cur is not None and cur < prev_peak:
                 swing_today[i].append("S2"); last_s["S2"] = i
-        if z >= 2 and ma[250][i] is not None and closes[i] < ma[250][i] * 0.97 and sst[250][i] in (0, -1) \
+        s3 = lambda j: 1 - (S3_SIGMA * sig[j] / 100 if sig[j] else 0.03)
+        if z >= 2 and ma[250][i] is not None and closes[i] < ma[250][i] * s3(i) and sst[250][i] in (0, -1) \
                 and any(sst[250][j] == 1 for j in range(max(0, i - 60), i)) and i - last_s.get("S3", -10 ** 9) >= SWING_COOLDOWN:
-            prev_ok = ma[250][i - 1] is not None and closes[i - 1] < ma[250][i - 1] * 0.97 and sst[250][i - 1] in (0, -1)
+            prev_ok = ma[250][i - 1] is not None and closes[i - 1] < ma[250][i - 1] * s3(i - 1) and sst[250][i - 1] in (0, -1)
             if not prev_ok:
                 swing_today[i].append("S3"); last_s["S3"] = i
+
+    P3 = plan_v3(P["target_raw"], zone, over, trend, events, closes, ma, sst, swing_today, sig)
+    target, held, action, cause, ev_step = P["target"], P3["held"], P3["action"], P3["cause"], P["ev_step"]
 
     # plain-language level per day (§8.8, words follow what the plan does — agreed 2026-11-12)
     level = ["none"] * n
@@ -436,7 +485,7 @@ def analyze(dates, closes, amounts, val_obs, has_pb):
             "vbasis": vbasis, "vraw": vraw, "zone": zone, "trend": trend, "over": over, "over_pct": over_pct,
             "dist850": dist850, "align": align, "spread4": spread4, "gap": gap, "events": events, "ev_step": ev_step,
             "target": target, "held": held, "action": action, "cause": cause, "swing": swing_today,
-            "band": P["band"], "base": P["base"], "val_level": P["level"], "v1": P1,
+            "band": P["band"], "base": P["base"], "val_level": P["level"], "v1": P1, "v2": P, "v3": P3, "sig": sig, "kf": kf,
             "swing_exit": swing_exit, "open_swing": dict(open_tr), "level": level, "regime": regime, "hi60": hi60}
 
 
@@ -525,7 +574,7 @@ def plan_v2(zone, trend, over, vpct, events):
     rounding before the comparison would turn an 8-point wobble into a 10-point trade. No forced moves."""
     n = len(zone)
     target, held, action, cause = [None] * n, [None] * n, [0] * n, [[] for _ in range(n)]
-    base_l, band_l, level_l = [None] * n, [None] * n, [None] * n
+    base_l, band_l, level_l, traw = [None] * n, [None] * n, [None] * n, [None] * n
     ev_step = [{} for _ in range(n)]
     off, H, snap, last_dir = 0, None, None, {1: -10 ** 9, -1: -10 ** 9}
     for i in range(n):
@@ -556,7 +605,7 @@ def plan_v2(zone, trend, over, vpct, events):
                 last_dir[EVENT_DIR[ev]] = i
             ev_step[i][ev] = (st, round(newT - T, 1), note)
             off, T = new_off, newT
-        target[i], base_l[i], level_l[i] = round5(T), base, f
+        target[i], base_l[i], level_l[i], traw[i] = round5(T), base, f, T
         band_l[i] = (max(0, round5(f - PLAN_EVENT_CAP)), min(100, round5(f + PLAN_EVENT_CAP)))
         if H is None:
             H, snap = round5(T), (z, tr, over[i], p, off)
@@ -575,7 +624,103 @@ def plan_v2(zone, trend, over, vpct, events):
             action[i], H, snap = round5(T) - H, round5(T), (z, tr, over[i], p, off)
         held[i] = H
     return {"target": target, "held": held, "action": action, "cause": cause, "ev_step": ev_step, "band": band_l,
-            "base": base_l, "level": level_l}
+            "base": base_l, "level": level_l, "target_raw": traw}
+
+
+def plan_v3(T_raw, zone, over, trend, events, closes, ma, sst, swing, sig):
+    """Plan v3 (agreed 2026-11-18): the target is plan v2's (valuation, trend term, 过热, events); the suggested position
+    moves towards it only on confirmation tiers, each tier at most once per episode (an episode ends when the gap is
+    < 10 points; buy tiers also restart on a new 60-day closing low, sell tiers on a new 60-day closing high).
+      add (target ≥ 10 above): needs no new 60-day low in the last 10 trading days and close > MA20 (every tier includes
+        the weaker one's condition), and then
+        1 初步止跌 → ≤ 10;  2 止跌加强 MA20 向上 or 回踩 today → ≤ 20;
+        3 趋势确认 金叉 today, or trend turned from 下降 to 转折/上升 today → the whole gap
+      reduce (target ≥ 10 below):
+        1 初步转弱 close < MA20 and MA20 走平 → ≤ 10;  2 转弱加强 死叉 today, or close < MA20 and MA20 向下 → ≤ 20;
+        3 趋势破坏 close ≤ peak × (1 − 1.5 σ_m), where peak = the highest close after the lowest close of the last 60 days
+          (the current up-move's peak, not a level from before a crash), or close < MA51 and MA51 not 向上, or S2 today with MA20 < MA51
+          → the whole gap
+      safety valve: 极高估 and 过热 → reduce 10 without confirmation, once per episode.
+    A tier that fires uses up the tiers below it; the next move needs a stronger tier (or a restart)."""
+    n = len(closes)
+    held, action, cause, state = [None] * n, [0] * n, [[] for _ in range(n)], [None] * n
+    W = V3_LOWHIGH_DAYS
+    new_low = [i >= W - 1 and closes[i] < min(closes[i - W + 1:i]) for i in range(n)]
+    new_high = [i >= W - 1 and closes[i] > max(closes[i - W + 1:i]) for i in range(n)]
+    H, used_b, used_s, valve = None, set(), set(), False
+    for i in range(n):
+        T = T_raw[i]
+        if T is None or ma[20][i] is None or ma[51][i] is None:
+            H, used_b, used_s, valve = None, set(), set(), False
+            continue
+        if H is None:
+            H = round5(T)
+            held[i] = H
+            continue
+        if new_low[i]:
+            used_b = set()
+        if new_high[i]:
+            used_s = set()
+        gap = T - H
+        if abs(gap) < ACT_MIN:
+            used_b, used_s, valve = set(), set(), False
+            held[i] = H
+            continue
+        c, m20, m51, s20, s51 = closes[i], ma[20][i], ma[51][i], sst[20][i], sst[51][i]
+        tier, why = 0, ""
+        if gap > 0:
+            calm = not any(new_low[max(0, i - V3_CALM_DAYS + 1):i + 1])
+            cand = []
+            if calm and c > m20:
+                cand.append((1, "初步止跌（10 天未创 60 日新低、站上 MA20）"))
+            if calm and c > m20 and (s20 == 1 or "回踩" in events[i]):
+                cand.append((2, "止跌加强（" + ("今日回踩" if "回踩" in events[i] else "MA20 向上") + "）"))
+            if calm and c > m20 and ("金叉" in events[i] or (i > 0 and trend[i] in ("转折", "上升") and trend[i - 1] == "下降")):
+                cand.append((3, "趋势确认（" + ("今日金叉" if "金叉" in events[i] else f"趋势转为{trend[i]}") + "）"))
+            cand = [x for x in cand if x[0] not in used_b]
+            if cand:
+                tier, why = max(cand)
+                step = min(V3_TIER_CAP[tier], round5(T) - H)
+                if step > 0:
+                    used_b |= set(range(1, tier + 1))
+                    action[i], H = step, H + step
+                    cause[i].append(f"估值目标 {round5(T):g}%，{why}")
+            else:
+                state[i] = ("add", "近 10 天内创过 60 日新低" if not calm else "收盘未站上 MA20" if c <= m20
+                            else "这一轮已用过的确认档不再重复，需要更强一档（MA20 向上、回踩或金叉）")
+        else:
+            trail = 1 - (TRAIL_SIGMA * sig[i] / 100 if sig[i] else 0.08)
+            w0 = max(0, i - W + 1)
+            lo_j = min(range(w0, i + 1), key=lambda j: (closes[j], -j))     # the lowest close of the last 60 days (latest if tied)
+            hi = max(closes[lo_j:i + 1])                                    # the peak of the move since then
+            cand = []
+            if c < m20 and s20 == 0:
+                cand.append((1, "初步转弱（跌破 MA20、MA20 走平）"))
+            if "死叉" in events[i] or (c < m20 and s20 == -1):
+                cand.append((2, "转弱加强（" + ("今日死叉" if "死叉" in events[i] else "跌破 MA20、MA20 向下") + "）"))
+            if c <= hi * trail or (c < m51 and s51 in (0, -1)) or ("S2" in swing[i] and m20 < m51):
+                what = (f"比这一波最高收盘回落 {(1 - c / hi) * 100:.1f}%" if c <= hi * trail else
+                        "跌破 MA51 且 MA51 不再向上" if c < m51 and s51 in (0, -1) else "顶背离且 MA20 在 MA51 下方")
+                cand.append((3, f"趋势破坏（{what}）"))
+            cand = [x for x in cand if x[0] not in used_s]
+            if cand:
+                tier, why = max(cand)
+                step = max(-V3_TIER_CAP[tier], round5(T) - H)
+                if step < 0:
+                    used_s |= set(range(1, tier + 1))
+                    action[i], H = step, H + step
+                    cause[i].append(f"估值目标 {round5(T):g}%，{why}")
+            elif zone[i] == 4 and over[i] and not valve:
+                step = max(-10, round5(T) - H)
+                if step < 0:
+                    valve = True
+                    action[i], H = step, H + step
+                    cause[i].append(f"估值目标 {round5(T):g}%，安全阀（极高估且过热，不等确认先减一档）")
+            else:
+                state[i] = ("reduce", "收盘仍在 MA20 上方" if c >= m20 else "MA20 仍向上" if s20 == 1
+                            else "这一轮已用过的确认档不再重复，需要更强一档（死叉、跌破 MA51 或大幅回落）")
+        held[i] = H
+    return {"held": held, "action": action, "cause": cause, "state": state}
 
 
 REGIMES = ["过热 / 牛市末期", "牛市中期", "牛市初期", "底部反转初期", "熊市末期 / 筑底", "熊市", "震荡"]
@@ -699,14 +844,14 @@ def last_segment(dates):
     return 0, 0
 
 
-def build_entry(code, name, group, source, dates, closes, amounts, val_obs, has_pb, val_source, price_fill=None):
+def build_entry(code, name, group, source, dates, closes, amounts, val_obs, basis, val_source, price_fill=None):
     k, gap = last_segment(dates)
     history_note = ""
     if k:                                   # moving averages must not bridge a hole: use the last continuous stretch only
         history_note = f"价格历史在 {dates[k - 1]} 到 {dates[k]} 之间中断（{gap} 天），只用 {dates[k]} 以后的数据"
         dates, closes, amounts = dates[k:], closes[k:], amounts[k:]
         val_obs = [o for o in val_obs if o[0] >= dates[0]]
-    A = analyze(dates, closes, amounts, val_obs, has_pb)
+    A = analyze(dates, closes, amounts, val_obs, basis)
     i = len(dates) - 1
     if i < 270 or A["trend"][i] is None:
         raise RuntimeError(f"history too short ({len(dates)} days)")
@@ -761,7 +906,12 @@ def build_entry(code, name, group, source, dates, closes, amounts, val_obs, has_
                "last_action": None if last_act is None else {
                    "date": dates[last_act], "from": A["held"][last_act] - A["action"][last_act], "to": A["held"][last_act],
                    "level": A["level"][last_act], "causes": A["cause"][last_act]}}
-        if not A["action"][i] and A["target"][i] != A["held"][i]:
+        st = A["v3"]["state"][i]
+        if st and not A["action"][i]:
+            pos["pending"] = (f"估值要求加仓（目标 {A['target'][i]:g}%）；等待止跌确认：{st[1]}" if st[0] == "add" else
+                              f"估值要求减仓（目标 {A['target'][i]:g}%）；等待转弱确认：{st[1]}")
+            pos["waiting"] = st[0]
+        elif not A["action"][i] and A["target"][i] != A["held"][i]:
             pos["pending"] = f"与目标相差不到 {ACT_MIN}%，暂不调整"
     swing = {"today": [{"id": s, "name": SWING_NAMES[s]} for s in A["swing"][i]],
              "open": [{"id": s, "name": SWING_NAMES[s], "since": dates[t0], "days": i - t0} for s, t0 in sorted(A["open_swing"].items())],
@@ -773,12 +923,17 @@ def build_entry(code, name, group, source, dates, closes, amounts, val_obs, has_
            "vol_ratio": r2(amt[i] / (sum(prev) / len(prev))) if amt[i] and len(prev) >= 16 else None,
            "vol_pct": fm.pct_below(win, amt[i]) if amt[i] and len(win) >= 200 else None,
            "hi250": r2(max(closes[max(0, i - 249):i + 1])), "lo250": r2(min(closes[max(0, i - 249):i + 1]))}
+    kf, sg = A["kf"][i], A["sig"][i]
+    thresholds = {"sigma_m": r2(sg), "k": r2(kf, 3), "flat": r2(FLAT_PCT * kf), "glue": r2(GLUE_PCT * kf), "cross": r2(CROSS_MIN_GAP * kf),
+                  "pullback": r2(PULLBACK_PCT * kf), "converge": r2(CONVERGE_PCT * kf), "diverge": r2(DIVERGE_PCT * kf),
+                  "b1": r2(B1_BAND_PCT * kf), "b3": r2(B3_BREAK_PCT * kf), "trail": r2(TRAIL_SIGMA * sg) if sg else 8.0,
+                  "b2": r2(B2_SIGMA * sg) if sg else 8.0, "s3": r2(S3_SIGMA * sg) if sg else 3.0, "from_vol": sg is not None}
     lv = A["level"][i]
     summary = {"code": code, "name": name, "group": group, "source": source, "date": dates[i], "close": r2(closes[i]),
                "chg": r2((closes[i] / closes[i - 1] - 1) * 100), "history_from": dates[0], "history_note": history_note,
                "price_fill": price_fill,
                "level": lv, "words": LEVELS[lv][1], "rank": LEVELS[lv][0], "valuation": val, "trend": trend, "timing": timing,
-               "regime": regime, "position": pos, "swing": swing, "ind": ind,
+               "regime": regime, "position": pos, "swing": swing, "ind": ind, "thresholds": thresholds,
                "reason": reason_text(name, val, trend, timing, pos, swing, lv)}
     # detail file: about three years of daily points
     k0 = max(0, len(dates) - CHART_DAYS)
@@ -883,28 +1038,51 @@ def main():
             fill = None
             if psrc == "csi":
                 nm, ds, cl, am, vo, fill = fetch_csi_long(code, today)
-                name2, src, vs, has_pb = name or nm or code, "中证指数官网（收盘、滚动市盈率、成交额）", "中证 滚动市盈率（无 PB）", False
+                name2, src, vs, has_pb = name or nm or code, "中证指数官网（收盘、滚动市盈率、成交额）", "中证 滚动市盈率（无 PB）", "pe_only"
                 if fill:
                     src += f"；{fill['from'][5:]}–{fill['to'][5:]} 的收盘和成交额来自东方财富（中证停在 {fill['csi_last'][5:]}）"
             else:
                 ds, cl, am = fetch_em(psrc.split(":", 1)[1])
                 vo = fetch_danjuan(vsrc.split(":", 1)[1])
-                name2, src, vs, has_pb = name, "东方财富日 K（收盘、成交额）", "蛋卷 PE / PB（周度）", True
+                name2, src, vs, has_pb = name, "东方财富日 K（收盘、成交额）", "蛋卷 PE / PB（周度）", "avg"
             return build_entry(code, name2, group, src, ds, cl, am, vo, has_pb, vs, fill)
         finish(code, group, job)
+        fm.pause()
+
+    for code, name, secids, dj, basis in HK:                 # 港股: Eastmoney prices (HK trading days), 蛋卷 weekly PE / PB
+        if time_left() < 30:
+            errors[code] = "time budget used up"
+            continue
+
+        def job(code=code, name=name, secids=secids, dj=dj, basis=basis):
+            last = None
+            for sid in secids:
+                try:
+                    ds, cl, am = fetch_em(sid)
+                    break
+                except Exception as e:
+                    last = e
+            else:
+                raise RuntimeError(f"Eastmoney K-line not available ({', '.join(secids)}): {last}")
+            vo = fetch_danjuan(dj)
+            return build_entry(code, name, "港股", f"东方财富日 K（{sid}，港股交易日）", ds, cl, am, vo, basis,
+                               "蛋卷 PE / PB（周度）" + ("，以 PE 为主" if basis == "pe" else ""))
+        finish(code, "港股", job)
         fm.pause()
 
     sw, waiting = load_sw()
     for code, name, ds, cl, am, vo in sw:
         def job(code=code, name=name, ds=ds, cl=cl, am=am, vo=vo):
-            return build_entry(code, name, "行业", "申万宏源研究（收盘、成交额、市盈率、市净率）", ds, cl, am, vo, True, "申万 PE / PB")
+            b = SW_BASIS.get(code, "avg")
+            return build_entry(code, name, "行业", "申万宏源研究（收盘、成交额、市盈率、市净率）", ds, cl, am, vo, b,
+                               "申万 " + {"pe": "PE 为主（亏损时 PB）", "pb": "PB 为主", "avg": "PE、PB 平均"}[b])
         finish(code, "行业", job)
     log(f"申万一级: {len(sw)} industries with prices" + (f"; {len(waiting)} still waiting for their price history" if waiting else ""))
 
     if not entries:
         log("Signals: nothing computed; previous files kept.")
         sys.exit(1)
-    order = {"宽基": 0, "行业": 1, "自选": 2}
+    order = {"宽基": 0, "港股": 1, "行业": 2, "自选": 3}
     entries.sort(key=lambda e: (order.get(e.get("group"), 9), e.get("code")))
     # sources publish at different times (Eastmoney can be a day ahead of CSI / 申万): the summary date is the date most
     # indices have; levels are counted for every fresh index at that date or later (older ones are shown, not counted)
@@ -920,6 +1098,8 @@ def main():
     doc = {"schema": 1, "version": SIGNALS_VERSION, "rules": RULES, "fetched_at_beijing": now.strftime("%Y-%m-%d %H:%M:%S"),
            "date": newest, "dates": dict(sorted(by_date.items())), "counts": counts, "sw_waiting": len(waiting), "errors": errors,
            "params": {"zone_edges": ZONE_EDGES, "zone_buffer": ZONE_BUFFER, "plan_knots": PLAN_KNOTS, "plan_event_cap": PLAN_EVENT_CAP,
+                      "sigma_ref": SIGMA_REF, "vol_days": [VOL_DAYS, VOL_MIN_DAYS], "sigma_multiples": {"trail": TRAIL_SIGMA, "b2": B2_SIGMA, "s3": S3_SIGMA},
+                      "v3_tier_cap": V3_TIER_CAP, "sw_basis": SW_BASIS,
                       "bands_v1": BANDS, "base_offset": BASE_OFFSET,
                       "overheat": [OVERHEAT_ON, OVERHEAT_OFF], "step": STEP, "act_min": ACT_MIN, "same_dir_gap": SAME_DIR_GAP},
            "indices": entries}
