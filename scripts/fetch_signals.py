@@ -16,6 +16,7 @@ Sources: CSI index-perf (close, PE, amount; one request per index from 2001), Ea
 Rules are fixed before any backtest (§8): do not tune them to history.
 """
 import bisect
+import math
 import json
 import os
 import re
@@ -26,8 +27,8 @@ from datetime import date, datetime, timedelta
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import fetch_market as fm                                   # noqa: E402  (shared helpers: HTTP, 申万 history, JSON files)
 
-SIGNALS_VERSION = "v1.2"
-RULES = "第一期（2026-11-12 定稿）"
+SIGNALS_VERSION = "v1.3"
+RULES = "第一期修订（2026-11-17：仓位随估值平滑变化）"
 TIME_BUDGET = float(os.environ.get("SIGNALS_TIME_BUDGET", 8 * 60))
 STARTED = time.monotonic()
 CSI_START = "20010101"          # CSI adds a phantom row dated at startDate: 1 January is never a trading day → dropped
@@ -54,6 +55,8 @@ ZONE_BUFFER = 3                          # hysteresis: a zone changes only 3 poi
 BANDS = [(80, 100), (60, 90), (40, 70), (10, 40), (0, 20)]
 TRENDS = ["下降", "转折", "上升"]
 BASE_OFFSET = {"下降": -5, "转折": 0, "上升": 5}      # base = band midpoint ±5 (agreed 2026-11-12)
+PLAN_KNOTS = [(5, 90), (20, 75), (50, 55), (80, 25), (95, 10)]   # plan v2: valuation percentile → position (the band midpoints)
+PLAN_EVENT_CAP = 20                      # plan v2: event steps move the target at most ±20 from the valuation level
 OVERHEAT_CUT = 10
 STEP = 10                                # one 档 = 10 % position
 ACT_MIN = 10                             # the plan changes only when the target moved ≥ 10 points (no 5-point fiddling)
@@ -315,64 +318,9 @@ def analyze(dates, closes, amounts, val_obs, has_pb):
             events[i].append("发散向上" if g > 0 else "发散向下")
             conv = False
 
-    # position plan (§8.6) — base by zone and trend, event steps, hold band of 10 points, valuation discipline
-    target, held, action, cause = [None] * n, [None] * n, [0] * n, [[] for _ in range(n)]
-    ev_step = [{} for _ in range(n)]                       # event → (table step, effective points, note)
-    off, H, last_dir = 0, None, {1: -10 ** 9, -1: -10 ** 9}
-    prev_key = None
-    for i in range(n):
-        z, tr = zone[i], trend[i]
-        if z is None or tr is None:
-            off, H, prev_key = 0, None, None
-            continue
-        lo, hi = BANDS[z]
-        base = (lo + hi) / 2 + BASE_OFFSET[tr] - (OVERHEAT_CUT if over[i] else 0)
-        T = min(hi, max(lo, base + off))
-        for ev in events[i]:
-            if ev not in EVENT_DIR:
-                continue
-            st = EVENT_STEPS.get((zone_group(z), tr), {}).get(ev, 0)
-            note = ""
-            if st and i - last_dir[EVENT_DIR[ev]] < SAME_DIR_GAP:
-                st_eff, note = 0, "20 日内已响应过同方向事件"
-            else:
-                st_eff = st
-            newT = min(hi, max(lo, T + STEP * st_eff))
-            if st_eff and newT == T:
-                note = "已在区间" + ("上限" if st_eff > 0 else "下限")
-            if newT != T:
-                last_dir[EVENT_DIR[ev]] = i
-            ev_step[i][ev] = (st, newT - T, note)
-            T = newT
-        off = T - base
-        target[i] = T
-        key = (z, tr, over[i])
-        if H is None:
-            H = T
-        else:
-            if prev_key is not None:
-                pz, ptr, pov = prev_key
-                if z != pz:
-                    cause[i].append(f"估值区 {ZONES[pz]} → {ZONES[z]}")
-                if tr != ptr:
-                    cause[i].append(f"趋势 {ptr} → {tr}")
-                if over[i] != pov:
-                    cause[i].append("出现过热" if over[i] else "过热解除")
-            for ev, (st, eff, note) in ev_step[i].items():
-                if eff:
-                    cause[i].append(f"{ev}（{'+' if eff > 0 else ''}{eff:g}%）")
-            if H < lo or H > hi:
-                cause[i].append(f"仓位必须回到 {lo}–{hi}% 区间")
-                action[i], H = T - H, T
-            elif abs(T - H) >= ACT_MIN:
-                if zone_group(z) == "cheap" and T < H:
-                    pass                                   # cheap: never reduce on weakening trend (valuation protects)
-                elif zone_group(z) == "dear" and T > H:
-                    pass                                   # dear: never add on strengthening trend (no chasing)
-                else:
-                    action[i], H = T - H, T
-        held[i] = H
-        prev_key = key
+    P1 = plan_v1(zone, trend, over, events)
+    P = plan_v2(zone, trend, over, vpct, events)
+    target, held, action, cause, ev_step = P["target"], P["held"], P["action"], P["cause"], P["ev_step"]
 
     # swing signals (§8.9)
     hi60 = [None] * n
@@ -488,7 +436,146 @@ def analyze(dates, closes, amounts, val_obs, has_pb):
             "vbasis": vbasis, "vraw": vraw, "zone": zone, "trend": trend, "over": over, "over_pct": over_pct,
             "dist850": dist850, "align": align, "spread4": spread4, "gap": gap, "events": events, "ev_step": ev_step,
             "target": target, "held": held, "action": action, "cause": cause, "swing": swing_today,
+            "band": P["band"], "base": P["base"], "val_level": P["level"], "v1": P1,
             "swing_exit": swing_exit, "open_swing": dict(open_tr), "level": level, "regime": regime, "hi60": hi60}
+
+
+def plan_v1(zone, trend, over, events):
+    """The plan as frozen on 2026-11-12 (§8.18, bands per zone). Kept unchanged: phase 2 reports it next to plan_v2."""
+    n = len(zone)
+    target, held, action, cause = [None] * n, [None] * n, [0] * n, [[] for _ in range(n)]
+    ev_step = [{} for _ in range(n)]                       # event → (table step, effective points, note)
+    off, H, last_dir = 0, None, {1: -10 ** 9, -1: -10 ** 9}
+    prev_key = None
+    for i in range(n):
+        z, tr = zone[i], trend[i]
+        if z is None or tr is None:
+            off, H, prev_key = 0, None, None
+            continue
+        lo, hi = BANDS[z]
+        base = (lo + hi) / 2 + BASE_OFFSET[tr] - (OVERHEAT_CUT if over[i] else 0)
+        T = min(hi, max(lo, base + off))
+        for ev in events[i]:
+            if ev not in EVENT_DIR:
+                continue
+            st = EVENT_STEPS.get((zone_group(z), tr), {}).get(ev, 0)
+            note = ""
+            if st and i - last_dir[EVENT_DIR[ev]] < SAME_DIR_GAP:
+                st_eff, note = 0, "20 日内已响应过同方向事件"
+            else:
+                st_eff = st
+            newT = min(hi, max(lo, T + STEP * st_eff))
+            if st_eff and newT == T:
+                note = "已在区间" + ("上限" if st_eff > 0 else "下限")
+            if newT != T:
+                last_dir[EVENT_DIR[ev]] = i
+            ev_step[i][ev] = (st, newT - T, note)
+            T = newT
+        off = T - base
+        target[i] = T
+        key = (z, tr, over[i])
+        if H is None:
+            H = T
+        else:
+            if prev_key is not None:
+                pz, ptr, pov = prev_key
+                if z != pz:
+                    cause[i].append(f"估值区 {ZONES[pz]} → {ZONES[z]}")
+                if tr != ptr:
+                    cause[i].append(f"趋势 {ptr} → {tr}")
+                if over[i] != pov:
+                    cause[i].append("出现过热" if over[i] else "过热解除")
+            for ev, (st, eff, note) in ev_step[i].items():
+                if eff:
+                    cause[i].append(f"{ev}（{'+' if eff > 0 else ''}{eff:g}%）")
+            if H < lo or H > hi:
+                cause[i].append(f"仓位必须回到 {lo}–{hi}% 区间")
+                action[i], H = T - H, T
+            elif abs(T - H) >= ACT_MIN:
+                if zone_group(z) == "cheap" and T < H:
+                    pass                                   # cheap: never reduce on weakening trend (valuation protects)
+                elif zone_group(z) == "dear" and T > H:
+                    pass                                   # dear: never add on strengthening trend (no chasing)
+                else:
+                    action[i], H = T - H, T
+        held[i] = H
+        prev_key = key
+    band = [BANDS[z] if z is not None else None for z in zone]
+    return {"target": target, "held": held, "action": action, "cause": cause, "ev_step": ev_step, "band": band}
+
+
+def val_level(p):
+    """Plan v2: position for a valuation percentile, piecewise linear through PLAN_KNOTS (flat outside)."""
+    if p <= PLAN_KNOTS[0][0]:
+        return float(PLAN_KNOTS[0][1])
+    for (x0, y0), (x1, y1) in zip(PLAN_KNOTS, PLAN_KNOTS[1:]):
+        if p <= x1:
+            return y0 + (y1 - y0) * (p - x0) / (x1 - x0)
+    return float(PLAN_KNOTS[-1][1])
+
+
+def round5(x):
+    return 5 * math.floor(x / 5 + 0.5)
+
+
+def plan_v2(zone, trend, over, vpct, events):
+    """Plan v2 (option A, 2026-11-17): the target follows the valuation percentile smoothly instead of jumping
+    between bands; trend ±5 (cheap: never negative, dear: never positive), 过热 −10, event steps ±10 kept within ±20;
+    the suggested position moves only when the unrounded target is ≥ 10 points away (then to the target rounded to 5);
+    rounding before the comparison would turn an 8-point wobble into a 10-point trade. No forced moves."""
+    n = len(zone)
+    target, held, action, cause = [None] * n, [None] * n, [0] * n, [[] for _ in range(n)]
+    base_l, band_l, level_l = [None] * n, [None] * n, [None] * n
+    ev_step = [{} for _ in range(n)]
+    off, H, snap, last_dir = 0, None, None, {1: -10 ** 9, -1: -10 ** 9}
+    for i in range(n):
+        z, tr, p = zone[i], trend[i], vpct[i]
+        if z is None or tr is None or p is None:
+            off, H, snap = 0, None, None
+            continue
+        g = zone_group(z)
+        f = val_level(p)
+        t = BASE_OFFSET[tr]
+        t = max(t, 0) if g == "cheap" else min(t, 0) if g == "dear" else t
+        base = f + t - (OVERHEAT_CUT if over[i] else 0)
+        T = min(100.0, max(0.0, base + off))                 # unrounded target
+        for ev in events[i]:
+            if ev not in EVENT_DIR:
+                continue
+            st = EVENT_STEPS.get((g, tr), {}).get(ev, 0)
+            note = ""
+            if st and i - last_dir[EVENT_DIR[ev]] < SAME_DIR_GAP:
+                st_eff, note = 0, "20 日内已响应过同方向事件"
+            else:
+                st_eff = st
+            new_off = max(-PLAN_EVENT_CAP, min(PLAN_EVENT_CAP, off + STEP * st_eff))
+            newT = min(100.0, max(0.0, base + new_off))
+            if st_eff and abs(newT - T) < 1e-9:
+                note = "已达事件调整上限" if st_eff > 0 else "已达事件调整下限"
+            if abs(newT - T) > 1e-9:
+                last_dir[EVENT_DIR[ev]] = i
+            ev_step[i][ev] = (st, round(newT - T, 1), note)
+            off, T = new_off, newT
+        target[i], base_l[i], level_l[i] = round5(T), base, f
+        band_l[i] = (max(0, round5(f - PLAN_EVENT_CAP)), min(100, round5(f + PLAN_EVENT_CAP)))
+        if H is None:
+            H, snap = round5(T), (z, tr, over[i], p, off)
+        elif abs(T - H) >= ACT_MIN:
+            sz, stv, sov, sp, so = snap
+            if round(sp) != round(p):
+                cause[i].append(f"估值百分位 {sp:.0f}% → {p:.0f}%（估值对应仓位 {val_level(sp):.0f}% → {f:.0f}%）")
+            if sz != z:
+                cause[i].append(f"估值区 {ZONES[sz]} → {ZONES[z]}")
+            if stv != tr:
+                cause[i].append(f"趋势 {stv} → {tr}")
+            if sov != over[i]:
+                cause[i].append("出现过热" if over[i] else "过热解除")
+            if so != off:
+                cause[i].append(f"事件调整 {so:+g}% → {off:+g}%" + "".join(f"（今日{ev}）" for ev, x in ev_step[i].items() if x[1]))
+            action[i], H, snap = round5(T) - H, round5(T), (z, tr, over[i], p, off)
+        held[i] = H
+    return {"target": target, "held": held, "action": action, "cause": cause, "ev_step": ev_step, "band": band_l,
+            "base": base_l, "level": level_l}
 
 
 REGIMES = ["过热 / 牛市末期", "牛市中期", "牛市初期", "底部反转初期", "熊市末期 / 筑底", "熊市", "震荡"]
@@ -663,20 +750,19 @@ def build_entry(code, name, group, source, dates, closes, amounts, val_obs, has_
     regime = {"state": A["regime"][i], "since": since(A["regime"], i),
               "checks": [{"state": nm, "ok": ok, "conds": [[t, c] for t, c in conds]} for nm, conds, ok in reg]}
     pos = None
-    if z is not None:
-        lo, hi = BANDS[z]
-        base = (lo + hi) / 2 + BASE_OFFSET[A["trend"][i]] - (OVERHEAT_CUT if A["over"][i] else 0)
+    if z is not None and A["held"][i] is not None:
+        lo, hi = A["band"][i]
+        base = round(A["base"][i], 1)
         last_act = next((j for j in range(i, -1, -1) if A["action"][j]), None)
         start = next(j for j in range(i, -1, -1) if j == 0 or A["held"][j - 1] is None)
-        pos = {"band": [lo, hi], "base": base, "target": A["target"][i], "held": A["held"][i], "action": A["action"][i],
+        pos = {"band": [lo, hi], "base": base, "val_level": round(A["val_level"][i], 1), "target": A["target"][i],
+               "held": A["held"][i], "action": A["action"][i],
                "causes": A["cause"][i] if A["action"][i] else [], "plan_from": dates[start],
                "last_action": None if last_act is None else {
                    "date": dates[last_act], "from": A["held"][last_act] - A["action"][last_act], "to": A["held"][last_act],
                    "level": A["level"][last_act], "causes": A["cause"][last_act]}}
         if not A["action"][i] and A["target"][i] != A["held"][i]:
-            pos["pending"] = ("低估区不因趋势转弱减仓" if zone_group(z) == "cheap" and A["target"][i] < A["held"][i] else
-                              "高估区不因趋势转强加仓" if zone_group(z) == "dear" and A["target"][i] > A["held"][i] else
-                              f"与目标相差不到 {ACT_MIN}%，暂不调整")
+            pos["pending"] = f"与目标相差不到 {ACT_MIN}%，暂不调整"
     swing = {"today": [{"id": s, "name": SWING_NAMES[s]} for s in A["swing"][i]],
              "open": [{"id": s, "name": SWING_NAMES[s], "since": dates[t0], "days": i - t0} for s, t0 in sorted(A["open_swing"].items())],
              "exits": [{"id": s, "name": SWING_NAMES[s], "since": dates[t0], "reason": r} for s, t0, r in A["swing_exit"][i]]}
@@ -723,9 +809,9 @@ def reason_text(name, val, trend, timing, pos, swing, lv):
         parts.append("波段 " + "、".join(f"{s['id']} {s['name']}" for s in swing["today"]))
     if pos:
         if pos["action"]:
-            parts.append(f"建议仓位 {pos['held'] - pos['action']:g}% → {pos['held']:g}%（区间 {pos['band'][0]}–{pos['band'][1]}%）")
+            parts.append(f"建议仓位 {pos['held'] - pos['action']:g}% → {pos['held']:g}%（估值对应 {pos['val_level']:.0f}%）")
         else:
-            parts.append(f"建议仓位 {pos['held']:g}%（区间 {pos['band'][0]}–{pos['band'][1]}%）")
+            parts.append(f"建议仓位 {pos['held']:g}%（估值对应 {pos['val_level']:.0f}%）")
     return f"{name} · {LEVELS[lv][1]} — " + " · ".join(parts)
 
 
@@ -833,7 +919,8 @@ def main():
             counts[e["level"]] = counts.get(e["level"], 0) + 1
     doc = {"schema": 1, "version": SIGNALS_VERSION, "rules": RULES, "fetched_at_beijing": now.strftime("%Y-%m-%d %H:%M:%S"),
            "date": newest, "dates": dict(sorted(by_date.items())), "counts": counts, "sw_waiting": len(waiting), "errors": errors,
-           "params": {"zone_edges": ZONE_EDGES, "zone_buffer": ZONE_BUFFER, "bands": BANDS, "base_offset": BASE_OFFSET,
+           "params": {"zone_edges": ZONE_EDGES, "zone_buffer": ZONE_BUFFER, "plan_knots": PLAN_KNOTS, "plan_event_cap": PLAN_EVENT_CAP,
+                      "bands_v1": BANDS, "base_offset": BASE_OFFSET,
                       "overheat": [OVERHEAT_ON, OVERHEAT_OFF], "step": STEP, "act_min": ACT_MIN, "same_dir_gap": SAME_DIR_GAP},
            "indices": entries}
     saved = fm.write_if_changed(out_path, doc)
