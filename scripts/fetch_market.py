@@ -59,7 +59,7 @@ BJ = timezone(timedelta(hours=8))
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/124.0 Safari/537.36")
 
-RELAY_VERSION = "v15.3"               # printed first in the log, so the Actions log shows which script ran
+RELAY_VERSION = "v15.4"               # printed first in the log, so the Actions log shows which script ran
 ERP_INDEX = "000906"                 # 中证800 (the default, published as "erp")
 ERP_OTHERS = [("000300", "沪深300"), ("000905", "中证500"), ("000852", "中证1000"), ("000985", "中证全指")]
 ERP_HISTORY_YEARS = 20               # requested history for ERP indices (CSI returns what it has)
@@ -572,6 +572,101 @@ def erp_block(csi_rows, y10, code=ERP_INDEX, name="中证800"):
         "forward": forward,
         "series": [[int(s[0].replace("-", "")), round(s[4], 3), s[1]] for s in weekly([s for s in series if s[0] > w10])],
     }
+
+
+# ---- 恒生指数 股债性价比 (v15.4): E/P from 蛋卷's weekly PE − the US 10-year Treasury yield (HKD is pegged to the USD)
+UST_URL = ("https://home.treasury.gov/resource-center/data-chart-center/interest-rates/daily-treasury-rates.csv/{y}/all"
+           "?type=daily_treasury_yield_curve&field_tdr_date_value={y}&page&_format=csv")
+UST_FROM_YEAR = 2016                      # 蛋卷's 恒生 PE starts 2016-11
+HSI_KLINE = ("https://push2his.eastmoney.com/api/qt/stock/kline/get?secid=100.HSI&ut=bd1d9ddb04089700cf9c27f6f7426281"
+             "&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57&klt=101&fqt=1&beg=20150101&end=20500101&lmt=10000")
+DJ_PE_URL = "https://danjuanfunds.com/djapi/index_eva/pe_history/{code}?day=all"
+DJ_HEADERS = {"Referer": "https://danjuanfunds.com/djmodule/value-center", "Accept": "application/json"}
+
+
+def ust_path():
+    return os.path.join(DATA_DIR, "history", "ust10.json")
+
+
+def parse_ust_csv(text):
+    """US Treasury daily par yield curve CSV → {YYYY-MM-DD: 10-year yield}."""
+    lines = [ln for ln in text.strip().splitlines() if ln.strip()]
+    if not lines:
+        return {}
+    hdr = [h.strip().strip('"') for h in lines[0].split(",")]
+    if "10 Yr" not in hdr or not hdr[0].lower().startswith("date"):
+        raise RuntimeError(f"unexpected Treasury header {hdr[:4]}")
+    k, out = hdr.index("10 Yr"), {}
+    for ln in lines[1:]:
+        p = [x.strip().strip('"') for x in ln.split(",")]
+        m = re.match(r"(\d{2})/(\d{2})/(\d{4})$", p[0]) if p else None
+        v = num(p[k]) if len(p) > k else None
+        if m and v is not None and 0 < v < 25:
+            out[f"{m.group(3)}-{m.group(1)}-{m.group(2)}"] = v
+    return out
+
+
+def fetch_ust10(today):
+    """10-year yield since 2016, cached in data/history/ust10.json: past years once, the current year every run."""
+    cache = read_json(ust_path(), {}) or {}
+    rows, done = dict(cache.get("rows") or {}), set(cache.get("years") or [])
+    for y in range(UST_FROM_YEAR, today.year + 1):
+        if y < today.year and y in done:
+            continue
+        got = parse_ust_csv(get_bytes(UST_URL.format(y=y), {"Accept": "text/csv"}, attempts=3, timeout=30, deadline=60).decode("utf-8", "replace"))
+        if not got and y < today.year:
+            raise RuntimeError(f"US Treasury {y}: no rows")
+        rows.update(got)
+        if y < today.year and len(got) >= 200:
+            done.add(y)
+        pause()
+    if not rows:
+        raise RuntimeError("no US Treasury yields")
+    write_if_changed(ust_path(), {"source": "US Treasury daily par yield curve, 10 Yr", "years": sorted(done),
+                                  "rows": dict(sorted(rows.items()))})
+    return rows
+
+
+def hsi_rows():
+    """[(date, close, pe)] on 蛋卷's weekly PE dates; close = 恒生指数 on that day or the last trading day before (≤ 7 days)."""
+    j = get_json(HSI_KLINE, {"Referer": "https://quote.eastmoney.com/"}, attempts=3, timeout=40)
+    closes = {}
+    for line in (((j or {}).get("data") or {}).get("klines") or []):
+        p = str(line).split(",")
+        if len(p) >= 3 and ymd(p[0]) and num(p[2]):
+            closes[ymd(p[0])] = num(p[2])
+    if len(closes) < 500:
+        raise RuntimeError(f"恒生指数: only {len(closes)} daily bars")
+    pause()
+    j = get_json(DJ_PE_URL.format(code="HKHSI"), DJ_HEADERS, attempts=2, timeout=30)
+    d = j.get("data") if isinstance(j, dict) else None
+    lst = next((v for v in (d or {}).values() if isinstance(v, list) and v and isinstance(v[0], dict)), None) if isinstance(d, dict) else None
+    if not lst:
+        raise RuntimeError("蛋卷 HKHSI pe_history: no list")
+    cdates = sorted(closes)
+    rows = []
+    for x in lst:
+        ts, pe = x.get("ts"), num(x.get("pe"))
+        if not ts or pe is None:
+            continue
+        day = datetime.fromtimestamp(int(ts) / 1000, BJ).date().isoformat()
+        i = bisect.bisect_right(cdates, day) - 1
+        if i >= 0 and (d_of(day) - d_of(cdates[i])).days <= 7:
+            rows.append((day, closes[cdates[i]], pe))
+    return sorted(rows)
+
+
+def run_hsi_erp(today):
+    ust = fetch_ust10(today)
+    b = erp_block(hsi_rows(), ust, "HSI", "恒生指数")
+    if (d_of(b["date"]) - d_of(b["y10_date"])).days > 7:
+        raise RuntimeError(f"US 10-year yield is stale ({b['y10_date']} vs PE {b['date']})")
+    b.update({"bond": "美国10年期国债", "frequency": "weekly",
+              "note": "估值来自蛋卷（每周一次）；价格来自东方财富；价格指数不含恒生约 3.5–4% 的股息"})
+    log(f"ERP 恒生指数: {b['date']} PE {b['pe']} → E/P {100 / b['pe']:.2f}% − US 10y {b['y10']}% = {b['erp']}%, "
+        f"{b['pct10y']}% percentile (10y, weekly, {b['n']} weeks), temperature {b['temperature']} ({b['band']}); "
+        f"US yields {min(ust)}…{max(ust)}")
+    return b
 
 
 def run_erp(today):
@@ -1566,6 +1661,14 @@ def main():
         blocks, erp_errors = run_erp(today)
         market["erp"] = blocks[ERP_INDEX]
         market["erp_others"] = [blocks[c] for c, _ in ERP_OTHERS if c in blocks]
+        try:
+            market["erp_others"].append(run_hsi_erp(today))
+        except Exception as e:
+            erp_errors["HSI"] = f"{type(e).__name__}: {e}"[:200]
+            log(f"ERP 恒生指数 failed: {erp_errors['HSI']}")
+            old = next((b for b in previous.get("erp_others", []) if isinstance(b, dict) and b.get("index") == "HSI"), None)
+            if old:
+                market["erp_others"].append(old)
         if erp_errors:
             market["erp_others_errors"] = erp_errors
         ok_any = True
