@@ -26,7 +26,7 @@ from datetime import date, datetime, timedelta
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import fetch_market as fm                                   # noqa: E402  (shared helpers: HTTP, 申万 history, JSON files)
 
-SIGNALS_VERSION = "v1.1"
+SIGNALS_VERSION = "v1.2"
 RULES = "第一期（2026-11-12 定稿）"
 TIME_BUDGET = float(os.environ.get("SIGNALS_TIME_BUDGET", 8 * 60))
 STARTED = time.monotonic()
@@ -547,8 +547,21 @@ def fetch_csi_long(code, today):
         name = r.get("indexNameCn") or name
         a = fm.num(r.get("tradingValue"))
         out[d] = (c, a if a and a > 0 else None, fm.num(r.get("peg")))
+    fill = None
+    closes = {d: v[0] for d, v in out.items()}
+    amounts = {d: v[1] for d, v in out.items() if v[1]}
+    csi_last = max(out) if out else None
+    try:
+        added = fm.em_fill(code, closes, amounts)          # CSI behind (2026-11-12/13): close + amount from Eastmoney, never PE
+        for d in added:
+            out[d] = (closes[d], amounts.get(d), None)
+        if added:
+            fill = {"csi_last": csi_last, "from": added[0], "to": added[-1]}
+    except Exception as e:
+        log(f"  {code}: CSI ends {csi_last}; no Eastmoney fill ({type(e).__name__}: {str(e)[:100]})")
     ds = sorted(out)
-    return name, ds, [out[d][0] for d in ds], [out[d][1] for d in ds], [(d, out[d][2], None) for d in ds if out[d][2] is not None]
+    return (name, ds, [out[d][0] for d in ds], [out[d][1] for d in ds], [(d, out[d][2], None) for d in ds if out[d][2] is not None],
+            fill)
 
 
 def fetch_em(secid):
@@ -599,7 +612,7 @@ def last_segment(dates):
     return 0, 0
 
 
-def build_entry(code, name, group, source, dates, closes, amounts, val_obs, has_pb, val_source):
+def build_entry(code, name, group, source, dates, closes, amounts, val_obs, has_pb, val_source, price_fill=None):
     k, gap = last_segment(dates)
     history_note = ""
     if k:                                   # moving averages must not bridge a hole: use the last continuous stretch only
@@ -677,6 +690,7 @@ def build_entry(code, name, group, source, dates, closes, amounts, val_obs, has_
     lv = A["level"][i]
     summary = {"code": code, "name": name, "group": group, "source": source, "date": dates[i], "close": r2(closes[i]),
                "chg": r2((closes[i] / closes[i - 1] - 1) * 100), "history_from": dates[0], "history_note": history_note,
+               "price_fill": price_fill,
                "level": lv, "words": LEVELS[lv][1], "rank": LEVELS[lv][0], "valuation": val, "trend": trend, "timing": timing,
                "regime": regime, "position": pos, "swing": swing, "ind": ind,
                "reason": reason_text(name, val, trend, timing, pos, swing, lv)}
@@ -743,6 +757,7 @@ def main():
     if os.environ.get("MARKET_TODAY"):
         now = datetime.fromisoformat(os.environ["MARKET_TODAY"]).replace(tzinfo=fm.BJ)
     today = now.date()
+    fm.NOW = now                                            # the Eastmoney fill decides which days have closed
     out_path = os.path.join(fm.DATA_DIR, "signals.json")
     previous = fm.read_json(out_path, {}) or {}
     prev_by_code = {e.get("code"): e for e in previous.get("indices", []) if isinstance(e, dict)}
@@ -756,7 +771,9 @@ def main():
             log(f"  {code} {summary['name']}: {summary['date']} {summary['words']} — "
                 f"{summary['valuation']['zone'] or summary['valuation'].get('note')} · {summary['trend']['state']} · "
                 f"{summary['regime']['state']}" + (f" · 仓位 {summary['position']['held']:g}%" if summary['position'] else "")
-                + (f" [{summary['history_note']}]" if summary.get('history_note') else ""))
+                + (f" [{summary['history_note']}]" if summary.get('history_note') else "")
+                + (f" [prices {summary['price_fill']['from']}…{summary['price_fill']['to']} from Eastmoney; CSI ends "
+                   f"{summary['price_fill']['csi_last']}, valuation {summary['valuation']['date']}]" if summary.get('price_fill') else ""))
             if fm.write_if_changed(os.path.join(signals_dir(), f"{code}.json"), detail, ignore=()):
                 written += 1
             return summary
@@ -777,14 +794,17 @@ def main():
         group = "宽基" if any(code == b[0] for b in BROAD) else "自选"
 
         def job(code=code, name=name, psrc=psrc, vsrc=vsrc, group=group):
+            fill = None
             if psrc == "csi":
-                nm, ds, cl, am, vo = fetch_csi_long(code, today)
+                nm, ds, cl, am, vo, fill = fetch_csi_long(code, today)
                 name2, src, vs, has_pb = name or nm or code, "中证指数官网（收盘、滚动市盈率、成交额）", "中证 滚动市盈率（无 PB）", False
+                if fill:
+                    src += f"；{fill['from'][5:]}–{fill['to'][5:]} 的收盘和成交额来自东方财富（中证停在 {fill['csi_last'][5:]}）"
             else:
                 ds, cl, am = fetch_em(psrc.split(":", 1)[1])
                 vo = fetch_danjuan(vsrc.split(":", 1)[1])
                 name2, src, vs, has_pb = name, "东方财富日 K（收盘、成交额）", "蛋卷 PE / PB（周度）", True
-            return build_entry(code, name2, group, src, ds, cl, am, vo, has_pb, vs)
+            return build_entry(code, name2, group, src, ds, cl, am, vo, has_pb, vs, fill)
         finish(code, group, job)
         fm.pause()
 
