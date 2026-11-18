@@ -27,7 +27,7 @@ from datetime import date, datetime, timedelta
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import fetch_market as fm                                   # noqa: E402  (shared helpers: HTTP, 申万 history, JSON files)
 
-SIGNALS_VERSION = "v1.4"
+SIGNALS_VERSION = "v1.4.1"
 RULES = "第一期定稿（2026-11-18：v3 分档时机、按波动缩放、行业估值依据）"
 TIME_BUDGET = float(os.environ.get("SIGNALS_TIME_BUDGET", 8 * 60))
 STARTED = time.monotonic()
@@ -627,7 +627,7 @@ def plan_v2(zone, trend, over, vpct, events):
             "base": base_l, "level": level_l, "target_raw": traw}
 
 
-def plan_v3(T_raw, zone, over, trend, events, closes, ma, sst, swing, sig):
+def plan_v3(T_raw, zone, over, trend, events, closes, ma, sst, swing, sig, tier3_ok=None):
     """Plan v3 (agreed 2026-11-18): the target is plan v2's (valuation, trend term, 过热, events); the suggested position
     moves towards it only on confirmation tiers, each tier at most once per episode (an episode ends when the gap is
     < 10 points; buy tiers also restart on a new 60-day closing low, sell tiers on a new 60-day closing high).
@@ -641,7 +641,8 @@ def plan_v3(T_raw, zone, over, trend, events, closes, ma, sst, swing, sig):
           (the current up-move's peak, not a level from before a crash), or close < MA51 and MA51 not 向上, or S2 today with MA20 < MA51
           → the whole gap
       safety valve: 极高估 and 过热 → reduce 10 without confirmation, once per episode.
-    A tier that fires uses up the tiers below it; the next move needs a stronger tier (or a restart)."""
+    A tier that fires uses up the tiers below it; the next move needs a stronger tier (or a restart).
+    tier3_ok (phase 2 only, default None = the frozen rule): a per-day filter for adding tier 3 (weekly MACD variant)."""
     n = len(closes)
     held, action, cause, state = [None] * n, [0] * n, [[] for _ in range(n)], [None] * n
     W = V3_LOWHIGH_DAYS
@@ -675,7 +676,8 @@ def plan_v3(T_raw, zone, over, trend, events, closes, ma, sst, swing, sig):
                 cand.append((1, "初步止跌（10 天未创 60 日新低、站上 MA20）"))
             if calm and c > m20 and (s20 == 1 or "回踩" in events[i]):
                 cand.append((2, "止跌加强（" + ("今日回踩" if "回踩" in events[i] else "MA20 向上") + "）"))
-            if calm and c > m20 and ("金叉" in events[i] or (i > 0 and trend[i] in ("转折", "上升") and trend[i - 1] == "下降")):
+            if calm and c > m20 and (tier3_ok is None or tier3_ok[i]) and (
+                    "金叉" in events[i] or (i > 0 and trend[i] in ("转折", "上升") and trend[i - 1] == "下降")):
                 cand.append((3, "趋势确认（" + ("今日金叉" if "金叉" in events[i] else f"趋势转为{trend[i]}") + "）"))
             cand = [x for x in cand if x[0] not in used_b]
             if cand:
