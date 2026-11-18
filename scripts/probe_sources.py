@@ -1,120 +1,76 @@
 #!/usr/bin/env python3
 """
-Probe 10: sources for per-fund signals (第三期). Read-only, writes nothing.
-Paste into scripts/probe_sources.py, run "Probe data sources" from the Actions tab, paste the whole log back.
-
-  A) 同花顺 hqcode from the relay (fund.10jqka.com.cn/data/client/myfund/{code}) — known: 001593 → JST320, 008888 → JSH923
-  B) tracked index of index funds: Eastmoney mobile API and the F10 page (跟踪标的, 业绩比较基准, 基金类型)
-  C) full NAV history from the relay (pingzhongdata)
-  D) which industry a stock belongs to (for holdings look-through): Eastmoney quote field f100, 申万 component stocks
+Probe 11b: can the app find a fund's 同花顺 hqcode by itself, the moment a fund is added? Read-only.
+  A) JSONP variants of the lookup  B) the estimate API with fund codes
+  C) a full hqcode table on GitHub: the list of all funds (Eastmoney) and a multi-code lookup at 同花顺
+The lookup URL returns plain JSON (no CORS) — the browser can only read script-style answers (JSONP).
+Paste into scripts/probe_sources.py, run "Probe data sources", paste the whole log back.
 """
-import json
-import re
-import ssl
 import time
-import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
 
 BJ = timezone(timedelta(hours=8))
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
-FUNDS = ["001593", "008888", "110022", "161725", "005827", "159601", "512770", "013416"]   # index C / sector C / active / LOF / active / ETF / ETF / other
-STOCKS = [("1", "600519"), ("0", "000858"), ("0", "300750"), ("1", "601318"), ("0", "002594")]
 
 
-SW_AIA = "http://cacerts.digicert.cn/GeoTrustG2TLSCNRSA4096SHA2562022CA1.crt"
-
-
-def sw_ctx():
-    raw = urllib.request.urlopen(urllib.request.Request(SW_AIA, headers={"User-Agent": UA}), timeout=20).read()
-    pem = raw.decode() if b"BEGIN CERTIFICATE" in raw else ssl.DER_cert_to_PEM_cert(raw)
-    ctx = ssl.create_default_context()
-    ctx.load_verify_locations(cadata=pem)
-    return ctx
-
-
-def get(url, headers=None, timeout=30, ctx=None):
-    h = {"User-Agent": UA, "Accept-Language": "zh-CN,zh;q=0.9"}
-    h.update(headers or {})
-    t0 = time.monotonic()
-    with urllib.request.urlopen(urllib.request.Request(url, headers=h), timeout=timeout, context=ctx) as r:
-        body, code = r.read(), r.status
-    return body.decode("utf-8", "replace"), code, time.monotonic() - t0
-
-
-def safe(label, fn):
+def show(label, url, ref="https://fund.10jqka.com.cn/"):
     try:
-        fn()
+        t0 = time.monotonic()
+        req = urllib.request.Request(url, headers={"User-Agent": UA, "Referer": ref})
+        with urllib.request.urlopen(req, timeout=25) as r:
+            body = r.read().decode("utf-8", "replace")
+            ctype = r.headers.get("Content-Type", "")
+            cors = r.headers.get("Access-Control-Allow-Origin")
+        print(f"  {label}: HTTP 200 {ctype!r} CORS={cors!r} {len(body)} bytes {time.monotonic() - t0:.1f}s; starts {body[:140]!r}")
     except Exception as e:
-        print(f"  {label}: ❌ {type(e).__name__}: {str(e)[:180]}")
-    time.sleep(0.8)
-
-
-def section(t):
-    print("=" * 100)
-    print(t)
+        print(f"  {label}: ❌ {type(e).__name__}: {str(e)[:150]}")
+    time.sleep(0.7)
 
 
 def main():
-    print(f"Probe 10 at {datetime.now(BJ).strftime('%Y-%m-%d %H:%M')} Beijing\n")
-    section("A) 同花顺 hqcode (expected: 001593 → JST320, 008888 → JSH923)")
-    for c in FUNDS:
-        def run(c=c):
-            text, code, secs = get(f"https://fund.10jqka.com.cn/data/client/myfund/{c}", {"Referer": "https://fund.10jqka.com.cn/"})
-            m = re.search(r'"hqcode"\s*:\s*"([^"]+)"', text)
-            n = re.search(r'"name"\s*:\s*"([^"]+)"', text)
-            print(f"  {c}: HTTP {code}, {len(text)} bytes in {secs:.1f}s; hqcode {m.group(1) if m else '-'}; name {n.group(1) if n else '-'}; "
-                  f"start {text[:120]!r}")
-        safe(c, run)
-
-    section("B) tracked index / type / benchmark")
-    for c in FUNDS:
-        def mob(c=c):
-            text, code, secs = get(f"https://fundmobapi.eastmoney.com/FundMApi/FundBaseTypeInformation.ashx?FCODE={c}"
-                                   f"&deviceid=Wap&plat=Wap&product=EFund&version=2.0.0", {"Referer": "https://mpservice.com/"})
-            j = json.loads(text)
-            d = j.get("Datas") or {}
-            keep = {k: d.get(k) for k in ("SHORTNAME", "FTYPE", "INDEXCODE", "INDEXNAME", "BENCH", "ESTABDATE", "ENDNAV", "FUNDTYPE") if k in d}
-            print(f"  {c} mobile API: HTTP {code} in {secs:.1f}s; {keep or text[:200]!r}")
-        safe(c + " mobile", mob)
-        def f10(c=c):
-            text, code, secs = get(f"https://fundf10.eastmoney.com/jbgk_{c}.html", {"Referer": "https://fundf10.eastmoney.com/"})
-            out = {}
-            for key in ("跟踪标的", "业绩比较基准", "基金类型"):
-                m = re.search(key + r"</th>\s*<td[^>]*>(.*?)</td>", text, re.S)
-                out[key] = re.sub(r"<[^>]+>", "", m.group(1)).strip()[:80] if m else None
-            print(f"  {c} F10 page: HTTP {code}, {len(text) // 1024} KB in {secs:.1f}s; {out}")
-        safe(c + " F10", f10)
-
-    section("C) NAV history from the relay (pingzhongdata)")
-    for c in FUNDS[:4]:
-        def pz(c=c):
-            text, code, secs = get(f"https://fund.eastmoney.com/pingzhongdata/{c}.js?v={int(time.time())}", {"Referer": "https://fund.eastmoney.com/"})
-            m = re.search(r"Data_netWorthTrend\s*=\s*(\[.*?\]);", text, re.S)
-            a = re.search(r"Data_ACWorthTrend\s*=\s*(\[.*?\]);", text, re.S)
-            n = len(json.loads(m.group(1))) if m else 0
-            first = json.loads(m.group(1))[0] if m else None
-            print(f"  {c}: HTTP {code}, {len(text) // 1024} KB in {secs:.1f}s; {n} NAV points from "
-                  f"{datetime.fromtimestamp(first['x'] / 1000, BJ).date() if first else '-'}; ACWorth {'yes' if a else 'no'}")
-        safe(c, pz)
-
-    section("D) stock → industry")
-    secids = ",".join(f"{m}.{c}" for m, c in STOCKS)
-    def em():
-        text, code, secs = get(f"https://push2.eastmoney.com/api/qt/ulist.np/get?fltt=2&fields=f12,f14,f100,f103&secids={secids}"
-                               f"&ut=bd1d9ddb04089700cf9c27f6f7426281", {"Referer": "https://quote.eastmoney.com/"})
-        j = json.loads(text)
-        print(f"  Eastmoney f100 (industry) / f103 (concepts): {[(x.get('f12'), x.get('f14'), x.get('f100'), str(x.get('f103'))[:40]) for x in ((j.get('data') or {}).get('diff') or [])]}")
-    safe("Eastmoney", em)
-    for url in ("https://www.swsresearch.com/institute-sw/api/index_publish/details/component_stocks/?swindexcode=801120&page=1&page_size=50",
-                "https://www.swsresearch.com/institute-sw/api/index_publish/component/?swindexcode=801120&page=1&page_size=50"):
-        def sw(url=url):
-            text, code, secs = get(url, {"Referer": "https://www.swsresearch.com/institute_sw/allIndex/releasedIndex", "Accept": "application/json"},
-                                   timeout=40, ctx=sw_ctx())
-            print(f"  申万 {url.split('/api/')[1][:60]}: HTTP {code} in {secs:.1f}s; {text[:300]!r}")
-        safe("申万", sw)
+    print(f"Probe 11b at {datetime.now(BJ).strftime('%Y-%m-%d %H:%M')} Beijing\n")
     print("=" * 100)
-    print("Probe 10 done. Please paste this whole log into the chat.")
+    print("A) the hqcode lookup with JSONP-style parameters (a JSONP answer starts with the callback name)")
+    base = "https://fund.10jqka.com.cn/data/client/myfund/001593"
+    for q in ("", "?callback=cb123", "?jsonp=cb123", "?cb=cb123", "?jsoncallback=cb123", "?return=jsonp&jsonp=cb123"):
+        show("myfund 001593" + q, base + q)
+    print("=" * 100)
+    print("B) the estimate API (script-loadable) with the fund code instead of the hqcode")
+    d = datetime.now(BJ).strftime("%m%d")
+    for name in ("vm_fd_JST320", "vm_fd_001593", "vm_fd_161725", "vm_fd_159601", "vm_fd_110022"):
+        show(name, f"https://gz-fund.10jqka.com.cn/?module=api&controller=index&action=chart&info={name}&start={d}&_={int(time.time() * 1000)}")
+    print("=" * 100)
+    print("C) all funds: Eastmoney's full list, and 同花顺 lookups for several codes in one request")
+    try:
+        t0 = time.monotonic()
+        req = urllib.request.Request("https://fund.eastmoney.com/js/fundcode_search.js", headers={"User-Agent": UA, "Referer": "https://fund.eastmoney.com/"})
+        with urllib.request.urlopen(req, timeout=40) as r:
+            body = r.read().decode("utf-8", "replace")
+        import json, re
+        arr = json.loads(re.search(r"=\s*(\[.*\])\s*;?\s*$", body, re.S).group(1))
+        types = {}
+        for x in arr:
+            types[x[3]] = types.get(x[3], 0) + 1
+        print(f"  fundcode_search.js: {len(arr)} funds, {len(body) // 1024} KB in {time.monotonic() - t0:.1f}s; first {arr[0]}; types {dict(sorted(types.items(), key=lambda kv: -kv[1])[:12])}")
+    except Exception as e:
+        print(f"  fundcode_search.js: ❌ {type(e).__name__}: {str(e)[:150]}")
+    codes = ["001593", "008888", "110022", "005827", "013416", "000001", "000248", "004788", "006195", "021049"]
+    for sep, n in ((",", 2), (",", 10), ("|", 2), ("_", 2)):
+        url = "https://fund.10jqka.com.cn/data/client/myfund/" + sep.join(codes[:n])
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": UA, "Referer": "https://fund.10jqka.com.cn/"})
+            t0 = time.monotonic()
+            with urllib.request.urlopen(req, timeout=25) as r:
+                body = r.read().decode("utf-8", "replace")
+            import re
+            got = re.findall(r'"code":"(\d{6})".*?"hqcode":"([^"]+)"', body)
+            print(f"  {n} codes joined by {sep!r}: {len(body)} bytes {time.monotonic() - t0:.1f}s; (code, hqcode) found {got}")
+        except Exception as e:
+            print(f"  {n} codes joined by {sep!r}: ❌ {type(e).__name__}: {str(e)[:150]}")
+        time.sleep(0.7)
+    print("=" * 100)
+    print("Probe 11b done. Please paste this whole log into the chat.")
 
 
 if __name__ == "__main__":
