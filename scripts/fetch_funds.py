@@ -19,7 +19,7 @@ from datetime import datetime, timedelta
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import fetch_market as fm          # noqa: E402
 
-FUNDS_VERSION = "v1"
+FUNDS_VERSION = "v1.1"
 ALL_FUNDS_URL = "https://fund.eastmoney.com/js/fundcode_search.js"
 THS_LOOKUP = "https://fund.10jqka.com.cn/data/client/myfund/{codes}"
 THS_HEADERS = {"Referer": "https://fund.10jqka.com.cn/"}
@@ -37,7 +37,10 @@ ALIASES = {"沪深300": "000300", "中证500": "000905", "中证1000": "000852",
            "中证全指证券公司": "399975", "证券公司": "399975", "中证煤炭": "399998", "中证医疗": "399989", "中证传媒": "399971",
            "中证新能源汽车": "399976", "中证生物科技主题": "930743", "中证全指医疗器械": "H30217", "中证全指半导体产品与设备": "H30184",
            "中证人工智能主题": "930713", "中证光伏产业": "931151", "中证主要消费": "000932", "中证内地消费主题": "000942",
-           "中证畜牧养殖": "930707", "中华交易服务半导体芯片行业": "990001", "恒生": "HKHSI", "恒生科技": "HKHSTECH", "恒生中国企业": "HKHSCEI"}
+           "中证畜牧养殖": "930707", "中华交易服务半导体芯片行业": "990001", "恒生": "HKHSI", "恒生科技": "HKHSTECH", "恒生中国企业": "HKHSCEI",
+           # v1.1 (first real run, 2026-11-19): sector indices whose names contain a broad index's name
+           "中证全指信息技术": "000993", "中证全指医药卫生": "000991", "中证全指家用电器": "930697", "中证养老产业": "399812",
+           "中证红利低波动": "H30269", "中证红利低波动100": "930955"}
 SW_NAMES = {}                                   # filled from the signal monitor (申万一级 names → codes)
 
 
@@ -199,12 +202,8 @@ def match_tracked(tracked, names):
         return None
     table = {norm(k): v for k, v in ALIASES.items()}
     table.update({norm(k): v for k, v in names.items()})
-    if t in table:
-        return table[t]
-    for k in sorted(table, key=len, reverse=True):              # the longest name contained in the text
-        if len(k) >= 4 and k in t:
-            return table[k]
-    return None
+    # exact names only (v1.1): "contains" matched 中证全指信息技术 to 中证全指 and 中证红利低波动 to 中证红利 in the first run
+    return table.get(t)
 
 
 def r2(fund_dates, fund_vals, idx):
