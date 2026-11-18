@@ -1,0 +1,39 @@
+name: Compute evidence (第二期 成绩单)
+
+# Backtest of every rule on the whole history of every index (handoff §8.11–8.12). Heavier than the daily runs, so weekly.
+on:
+  schedule:
+    # GitHub uses UTC. 12:00 UTC Sunday = 20:00 Beijing Sunday (markets closed, the week's data complete).
+    - cron: '0 12 * * 0'
+  workflow_dispatch:        # "Run workflow" button for manual runs
+
+permissions:
+  contents: write           # needed to save data/evidence.json and data/evidence/
+
+concurrency:
+  group: fetch-valuation    # same group as the daily workflow: never runs at the same time, so pushes do not collide
+  cancel-in-progress: false
+
+jobs:
+  evidence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Compute evidence (rule comparison, event studies, grades)
+        timeout-minutes: 30                # the script itself stops starting new indices after 25 minutes
+        run: python scripts/fetch_evidence.py
+
+      - name: Save the evidence
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          for f in data/evidence.json data/evidence; do if [ -e "$f" ]; then git add "$f"; fi; done
+          if git diff --cached --quiet; then echo "No evidence changes to save."; else
+            git commit -m "Update evidence $(date -u +%F)" && git pull --rebase --quiet && git push; fi
