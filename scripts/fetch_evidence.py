@@ -28,7 +28,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import fetch_market as fm          # noqa: E402
 import fetch_signals as fs         # noqa: E402
 
-EVIDENCE_VERSION = "v1"
+EVIDENCE_VERSION = "v1.1"
 TIME_BUDGET = float(os.environ.get("EVIDENCE_TIME_BUDGET", 25 * 60))
 STARTED = time.monotonic()
 
@@ -179,6 +179,18 @@ def metrics(dates, sim, start):
 
 
 # ====================================================================== decisions of the rule sets
+
+def changes_only(ws, start):
+    """A decision only on the days the target changes (and on the first day): the position is NOT rebalanced back to the
+    target every day as prices move — you act only when the plan changes (v1 rebalanced daily: 30+ trades a year)."""
+    out, prev = [None] * len(ws), None
+    for i in range(start, len(ws)):
+        w = ws[i]
+        if w is not None and (prev is None or w != prev):
+            out[i] = w
+            prev = w
+    return out
+
 
 def cross_decisions(A, n, trend_filter):
     out, state = [None] * n, None
@@ -475,11 +487,11 @@ def evaluate(item, a_dates):
                      tier3_ok=wk_ok)
     starts = [i for i in range(n) if A["held"][i] is not None]
     start = starts[0] if starts else next(i for i in range(n) if A["trend"][i] is not None)
-    dec = {"always": [1.0 if i >= start else None for i in range(n)],
-           "cross": cross_decisions(A, n, False), "cross_trend": cross_decisions(A, n, True)}
+    dec = {"always": changes_only([1.0] * n, start),
+           "cross": changes_only(cross_decisions(A, n, False), start), "cross_trend": changes_only(cross_decisions(A, n, True), start)}
     if starts:
         for key, held in (("v1", A["v1"]["held"]), ("v2", A["v2"]["held"]), ("v3", A["held"]), ("v3_weekly", P3w["held"])):
-            dec[key] = [None if h is None else h / 100 for h in held]
+            dec[key] = changes_only([None if h is None else h / 100 for h in held], start)
     comp, comp_c, curves = {}, {}, {}
     for key, ds in dec.items():
         sim = simulate(dates, closes, ds, exec_ok, start, hk=hk)
