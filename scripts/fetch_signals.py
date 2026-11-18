@@ -27,7 +27,7 @@ from datetime import date, datetime, timedelta
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import fetch_market as fm                                   # noqa: E402  (shared helpers: HTTP, 申万 history, JSON files)
 
-SIGNALS_VERSION = "v1.4.1"
+SIGNALS_VERSION = "v1.5"
 RULES = "第一期定稿（2026-11-18：v3 分档时机、按波动缩放、行业估值依据）"
 TIME_BUDGET = float(os.environ.get("SIGNALS_TIME_BUDGET", 8 * 60))
 STARTED = time.monotonic()
@@ -1030,6 +1030,12 @@ def main():
             return None
 
     extra = [c for c in fm.read_index_codes(fm.INDICES_FILE) if c not in {b[0] for b in BROAD}][:MAX_EXTRA]
+    # 第三期: indices that the user's passive funds track (data/funds_map.json, written weekly by fetch_funds.py map)
+    fmap = fm.read_json(os.path.join(fm.DATA_DIR, "funds_map.json"), {}) or {}
+    hk_codes = {h[0] for h in HK}
+    for c in (fmap.get("add_indices") or [])[:30]:
+        if re.fullmatch(r"[0-9A-Z]{6}", str(c)) and c not in extra and c not in {b[0] for b in BROAD} and c not in hk_codes:
+            extra.append(c)
     for code, name, psrc, vsrc in BROAD + [(c, "", "csi", "csi") for c in extra]:
         if time_left() < 30:
             errors[code] = "time budget used up"
