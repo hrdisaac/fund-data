@@ -28,7 +28,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import fetch_market as fm          # noqa: E402
 import fetch_signals as fs         # noqa: E402
 
-EVIDENCE_VERSION = "v1.2"
+EVIDENCE_VERSION = "v1.4"
 TIME_BUDGET = float(os.environ.get("EVIDENCE_TIME_BUDGET", 25 * 60))
 STARTED = time.monotonic()
 
@@ -43,17 +43,26 @@ ROUND_TRIP = BUY_FEE + 0.005                  # cost charged to an event's 60-da
 # C 类份额 (agreed 2026-11-19): no purchase fee, no redemption fee after 7 days, a sales service fee on the holding
 C_SERVICE_FEE = 0.003                         # 0.3 % a year, accrued daily
 C_REDEEM = [(7, 0.015)]
+ETF_FEE = 0.0003                              # 场内 ETF: commission on buying and on selling, no holding-period fees
 # groups fixed in advance (agreed 2026-11-19; industries by the valuation-basis table, i.e. by their economics)
 GROUPS = ["宽基", "港股", "周期与金融", "稳定与成长", "其他行业"]
 
 HORIZONS = (20, 60, 120)
 # price-only part over the whole price history (v1.2, agreed 2026-11-19): rules and events that need no valuation
 LONG_STRATEGIES = ["always", "cross", "cross_trend"]
-LONG_EVENTS = ["金叉", "死叉", "回踩", "发散向上", "发散向下", "周线绿柱缩短过半", "周线翻红"]
+LONG_EVENTS = ["金叉", "死叉", "回踩", "发散向上", "发散向下", "周线绿柱缩短过半", "周线翻红"]       # + ART_EVENTS (below)
 SPLIT = "2016-01-01"                          # the two periods of §8.11
-STRATEGIES = ["always", "cross", "cross_trend", "v1", "v2", "v3", "v3_weekly"]
+STRATEGIES = ["always", "cross", "cross_trend", "v1", "v2", "v3", "v3_weekly", "v4"]
 STRATEGY_NAMES = {"always": "一直满仓", "cross": "仅 20/51", "cross_trend": "20/51 + 趋势过滤", "v1": "仓位计划 v1",
-                  "v2": "仓位计划 v2", "v3": "仓位计划 v3", "v3_weekly": "v3 + 周线 MACD 过滤"}
+                  "v2": "仓位计划 v2", "v3": "仓位计划 v3", "v3_weekly": "v3 + 周线 MACD 过滤", "v4": "候选 v4（纸面跟踪）"}
+# candidate v4 (written 2026-11-19, BEFORE any forward data): judged only on days from TRACK_START on; its backtest over the
+# history is shown for reference only (that history has been looked at twice)
+TRACK_START = "2026-11-19"
+PAPER = ["always", "v3", "v4"]
+# the article's moving-average claims (2026-11-19), tested as written; pre-registered expectation: the first four no better
+# than any day, the last one worse ("反弹陷阱")
+ART_EVENTS = ["文章:5/10/20/60 多头排列", "文章:回踩 20 日线不破", "文章:回踩 60 日线不破", "文章:60 日线走平后拐头向上", "文章:下跌中 5 日上穿 10 日"]
+LONG_EVENTS = LONG_EVENTS + ART_EVENTS
 
 # events with a direction (+1 buy-type, −1 sell-type); regime 震荡 is reported without a grade
 BUY_EVENTS = ["金叉", "回踩", "发散向上", "B1", "B2", "B3", "周线绿柱缩短过半", "周线翻红"]
@@ -85,8 +94,8 @@ def simulate(dates, closes, decisions, exec_ok, start, hk=False, cash_yield=CASH
     Execution at the close of the first later day with exec_ok; the latest pending decision wins.
     share "A": purchase fee, redemption 1.5 % / 0.5 % / 0; "C": no purchase fee, 1.5 % only within 7 days, 0.3 % a year
     sales service fee on the holding. Returns dict(value[], weight[], trades, fees) from day `start` (value 1.0 there)."""
-    buy_fee = BUY_FEE if share == "A" else 0.0
-    table = REDEEM if share == "A" else C_REDEEM
+    buy_fee = BUY_FEE if share == "A" else ETF_FEE if share == "E" else 0.0
+    table = REDEEM if share == "A" else [(10 ** 9, ETF_FEE)] if share == "E" else C_REDEEM
     n = len(dates)
     lots, cash, pending = [], 1.0, []            # lots: [buy date, units]; pending: [release date, amount]
     value, weight = [None] * n, [None] * n
@@ -249,6 +258,80 @@ def weekly_macd(dates, closes):
             k += 1
         ok[i] = k >= 0 and good[k]                       # the latest week completed on or before day i
     return events, ok
+
+
+def plan_v4(T_raw, zone, over, regime, swing):
+    """Candidate v4 (2026-11-19): only the signals with evidence decide the timing.
+    Target = plan v2's (valuation, trend term, 过热, events); move only when ≥ 10 points away (ACT_MIN), then:
+      add — the whole gap, unless the market is in the 熊市 state (close < MA250, MA250 down, MA120 < MA250);
+      reduce — the whole gap when in the 熊市 state or after an S3 trend break within the last 20 trading days;
+      otherwise hold; safety valve: 极高估 and 过热 → −10 once per episode."""
+    n = len(T_raw)
+    held, action = [None] * n, [0] * n
+    H, valve = None, False
+    for i in range(n):
+        T = T_raw[i]
+        if T is None:
+            H, valve = None, False
+            continue
+        if H is None:
+            H = fs.round5(T)
+            held[i] = H
+            continue
+        gap = T - H
+        if abs(gap) < fs.ACT_MIN:
+            valve = False
+            held[i] = H
+            continue
+        step = 0
+        if gap > 0:
+            if regime[i] != "熊市":
+                step = fs.round5(T) - H
+        else:
+            s3 = any("S3" in swing[j] for j in range(max(0, i - 19), i + 1))
+            if regime[i] == "熊市" or s3:
+                step = fs.round5(T) - H
+            elif zone[i] == 4 and over[i] and not valve:
+                step = max(-10, fs.round5(T) - H)
+                valve = step < 0
+        if step:
+            action[i], H = step, H + step
+        held[i] = H
+    return {"held": held, "action": action}
+
+
+def article_days(closes, kf):
+    """The article's claims as exact conditions (MA5/10/20/60 on closes; "rising" = higher than 5 days ago, or for the
+    20/60-day lines than 20 days ago; "站稳" = 3 closes in a row above; "走平" = 20-day change within ±0.5 % × k)."""
+    n = len(closes)
+    m5, m10, m20, m60 = (fs.moving_average(closes, k) for k in (5, 10, 20, 60))
+    def up(m, i, d):
+        return i >= d and m[i] is not None and m[i - d] is not None and m[i] > m[i - d]
+    def sl60(i):
+        return None if i < 20 or m60[i] is None or m60[i - 20] is None else (m60[i] / m60[i - 20] - 1) * 100
+    bull = [i >= 80 and None not in (m5[i], m10[i], m20[i], m60[i]) and m5[i] > m10[i] > m20[i] > m60[i]
+            and all(up(m, i, 5) for m in (m5, m10, m20, m60)) for i in range(n)]
+    ev = {k: [] for k in ART_EVENTS}
+    last_turn = -10 ** 9
+    for i in range(81, n):
+        if bull[i] and not bull[i - 1]:
+            ev["文章:5/10/20/60 多头排列"].append(i)
+        trend_up = m20[i] > m60[i] and up(m20, i, 20) and up(m60, i, 20)
+        for key, m in (("文章:回踩 20 日线不破", m20), ("文章:回踩 60 日线不破", m60)):
+            touch = m[i] <= closes[i] <= m[i] * 1.01
+            prev_touch = m[i - 1] <= closes[i - 1] <= m[i - 1] * 1.01
+            above = any(closes[j] >= m[j] * 1.03 for j in range(i - 10, i))
+            if trend_up and touch and not prev_touch and above:
+                ev[key].append(i)
+        s = sl60(i)
+        if s is not None and s > 0.5 * kf[i] and all(closes[j] > m60[j] for j in (i, i - 1, i - 2)) and i - last_turn >= 60:
+            flats = sum(1 for j in range(i - 20, i) if sl60(j) is not None and abs(sl60(j)) <= 0.5 * kf[j])
+            if flats >= 15:
+                ev["文章:60 日线走平后拐头向上"].append(i)
+                last_turn = i
+        if m5[i] > m10[i] and m5[i - 1] <= m10[i - 1] and m60[i] < m60[i - 20]:
+            ev["文章:下跌中 5 日上穿 10 日"].append(i)
+    return ev
 
 
 # ====================================================================== event studies
@@ -493,8 +576,9 @@ def evaluate(item, a_dates):
     start = starts[0] if starts else next(i for i in range(n) if A["trend"][i] is not None)
     dec = {"always": changes_only([1.0] * n, start),
            "cross": changes_only(cross_decisions(A, n, False), start), "cross_trend": changes_only(cross_decisions(A, n, True), start)}
+    P4 = plan_v4(A["v2"]["target_raw"], A["zone"], A["over"], A["regime"], A["swing"])
     if starts:
-        for key, held in (("v1", A["v1"]["held"]), ("v2", A["v2"]["held"]), ("v3", A["held"]), ("v3_weekly", P3w["held"])):
+        for key, held in (("v1", A["v1"]["held"]), ("v2", A["v2"]["held"]), ("v3", A["held"]), ("v3_weekly", P3w["held"]), ("v4", P4["held"])):
             dec[key] = changes_only([None if h is None else h / 100 for h in held], start)
     comp, comp_c, curves = {}, {}, {}
     for key, ds in dec.items():
@@ -512,6 +596,9 @@ def evaluate(item, a_dates):
         comp_long[key] = metrics(dates, simulate(dates, closes, ds_, exec_ok, start_long, hk=hk), start_long)
     base_long = {d: {h: baseline(closes, exec_ok, start_long, d, h) for h in HORIZONS} for d in (1, -1)}
     sig = signal_days(A, wk_events, n)
+    for name, days in article_days(closes, A["kf"]).items():
+        if days:
+            sig[name] = (1, days)
     for name, (d, days) in sig.items():
         if name in LONG_EVENTS:
             days = [i for i in days if i >= start_long]
@@ -524,7 +611,21 @@ def evaluate(item, a_dates):
         rows = {h: study(closes, dates, exec_ok, days, d, h) for h in HORIZONS}
         events[name] = {"dir": d, "rows": rows,
                         "stats": {h: summarize([x for x in rows[h] if x["indep"]], d, base[d][h]) for h in HORIZONS}}
-    return {"A": A, "start": start, "comp": comp, "comp_c": comp_c, "curves": curves, "comp_long": comp_long,
+    # paper tracking: from TRACK_START on only, each rule starting from its own position on that day
+    ts = bisect.bisect_left(dates, TRACK_START)
+    paper = {"days": max(0, n - ts)}
+    if ts < n and starts:
+        for key, held in (("always", [100] * n), ("v3", A["held"]), ("v4", P4["held"])):
+            ds_ = changes_only([None if h is None else h / 100 for h in held], ts)
+            sim = simulate(dates, closes, ds_, exec_ok, ts, hk=hk)
+            v = [x for x in sim["value"][ts:] if x is not None]
+            pk, mdd = v[0], 0.0
+            for x in v:
+                pk = max(pk, x)
+                mdd = min(mdd, x / pk - 1)
+            paper[key] = {"total": round((v[-1] - 1) * 100, 2), "mdd": round(mdd * 100, 2), "trades": sim["trades"],
+                          "position_now": held[-1] if key != "always" else 100}
+    return {"A": A, "start": start, "comp": comp, "comp_c": comp_c, "curves": curves, "comp_long": comp_long, "paper": paper, "P4": P4,
             "long": {"events": events_long, "base": base_long, "from": dates[start_long]}, "base": base, "events": events,
             "crashes": crashes(dates, closes, A, exec_ok), "fib": fib_days(dates, closes), "exec_ok": exec_ok}
 
@@ -577,6 +678,9 @@ def load_universe(today):
     return items, errors
 
 
+_PER = {}                                     # the last build's per-index results (fund backtests reuse them)
+
+
 def r1(x, nd=1):
     return None if x is None else round(x, nd)
 
@@ -584,6 +688,7 @@ def r1(x, nd=1):
 def build(items, today_text):
     a_dates = next((it["dates"] for it in items if it["code"] == "000300"), None) or next((it["dates"] for it in items if it["market"] == "a"), [])
     per, details, crash_rows, fib_pool, errors = {}, {}, [], {r: [] for r in FIB_RATIOS + FIB_CONTROL}, {}
+    _PER.clear()
     for it in items:
         if time_left() < 60:
             errors[it["code"]] = "time budget used up"
@@ -595,6 +700,7 @@ def build(items, today_text):
             log(f"  {it['code']}: failed ({errors[it['code']]})")
             continue
         per[it["code"]] = R
+        _PER[it["code"]] = R
         for c in R["crashes"]:
             crash_rows.append({"code": it["code"], "name": it["name"], **c})
         base = R["base"][1][60]
@@ -667,6 +773,15 @@ def build(items, today_text):
                                "cagr_better": sum(1 for a, b in rows if a["cagr"] > b["cagr"]),
                                "median_cagr_gap": round(statistics.median(a["cagr"] - b["cagr"] for a, b in rows), 2),
                                "median_mdd_gap": round(statistics.median(a["mdd"] - b["mdd"] for a, b in rows), 2)}
+    pp = [R["paper"] for R in per.values() if R["paper"].get("v3")]
+    paper_summary = {"indices": len(pp), "days": max((x["days"] for x in pp), default=0)}
+    for k in PAPER:
+        xs = [x[k]["total"] for x in pp if x.get(k)]
+        if xs:
+            paper_summary[k] = {"median_total": round(statistics.median(xs), 2), "trades": sum(x[k]["trades"] for x in pp if x.get(k))}
+    if pp:
+        paper_summary["v4_better"] = sum(1 for x in pp if x["v4"]["total"] > x["v3"]["total"])
+        paper_summary["v4_worse"] = sum(1 for x in pp if x["v4"]["total"] < x["v3"]["total"])
     fib = {}
     for r, xs in fib_pool.items():
         if xs:
@@ -683,15 +798,47 @@ def build(items, today_text):
     crash_sum["v3_vs_bottom_median"] = r1(statistics.median(xs)) if xs else None
     indices = [{"code": c, "name": next(it["name"] for it in items if it["code"] == c), "group": next(it["group"] for it in items if it["code"] == c),
                 "egroup": egroup.get(c), "comparison": R["comp"], "comparison_c": R["comp_c"], "comparison_long": R["comp_long"],
-                "long_from": R["long"]["from"],
+                "long_from": R["long"]["from"], "paper": R["paper"],
                 "base60": {"buy": R["base"][1][60], "sell": R["base"][-1][60]}} for c, R in per.items()]
     doc = {"schema": 1, "version": EVIDENCE_VERSION, "generated_beijing": today_text, "rules": fs.RULES,
            "costs": {"A": {"buy": BUY_FEE, "redeem": REDEEM}, "C": {"buy": 0, "redeem": C_REDEEM, "service_fee": C_SERVICE_FEE},
                      "cash_yield": CASH_YIELD, "hk_settle_days": HK_SETTLE_DAYS, "round_trip_for_grades": ROUND_TRIP}, "groups": GROUPS,
            "strategies": STRATEGY_NAMES, "summary": summary, "signals": signals, "indices": indices,
            "extra": {"crashes": crash_rows, "crash_summary": crash_sum, "fib": fib},
-           "long": {"strategies": LONG_STRATEGIES, "summary": long_summary, "signals": long_signals}, "errors": errors}
+           "long": {"strategies": LONG_STRATEGIES, "summary": long_summary, "signals": long_signals},
+           "paper": {"start": TRACK_START, "rules": PAPER, "summary": paper_summary}, "errors": errors}
     return doc, details
+
+
+def fund_backtests(items, per):
+    """第三期: each fund in data/funds_map.json with an index and ≥ 3 years of NAV: the index's v3 position applied to the
+    fund's accumulated NAV (decided on the index's close of that day or before, executed at the fund's next NAV), with the
+    fund's own costs (C shares by name, ETFs on exchange), against holding the fund."""
+    fmap = fm.read_json(os.path.join(fm.DATA_DIR, "funds_map.json"), {}) or {}
+    idx_dates = {it["code"]: it["dates"] for it in items}
+    out = {}
+    for code, row in (fmap.get("funds") or {}).items():
+        ic = row.get("index") if isinstance(row, dict) else None
+        if not ic or ic not in per or ic not in idx_dates:
+            continue
+        nav = fm.read_json(os.path.join(fm.DATA_DIR, "history", "fund_nav", f"{code}.json"), {}) or {}
+        ds, vs = nav.get("dates") or [], nav.get("nav") or []
+        if len(ds) < 750 or len(ds) != len(vs):
+            continue
+        held, idd = per[ic]["A"]["held"], idx_dates[ic]
+        w = []
+        for d in ds:
+            j = bisect.bisect_right(idd, d) - 1
+            w.append(None if j < 0 or held[j] is None else held[j] / 100)
+        start = next((k for k, x in enumerate(w) if x is not None), None)
+        if start is None or len(ds) - start < 500:
+            continue
+        share = "E" if row.get("kind") == "etf" else ("C" if str(row.get("name") or "").rstrip().endswith("C") else "A")
+        ok = [True] * len(ds)
+        out[code] = {"index": ic, "method": row.get("method"), "share": share,
+                     "v3": metrics(ds, simulate(ds, vs, changes_only(w, start), ok, start, share=share), start),
+                     "always": metrics(ds, simulate(ds, vs, changes_only([1.0] * len(ds), start), ok, start, share=share), start)}
+    return out
 
 
 def main():
@@ -708,6 +855,8 @@ def main():
         log("Nothing loaded; previous files kept.")
         sys.exit(1)
     doc, details = build(items, now.strftime("%Y-%m-%d %H:%M:%S"))
+    doc["funds"] = fund_backtests(items, _PER)
+    log(f"Fund backtests: {len(doc['funds'])} funds")
     doc["errors"].update(load_err)
     out_dir = os.path.join(fm.DATA_DIR, "evidence")
     written = sum(1 for c, d in details.items() if fm.write_if_changed(os.path.join(out_dir, f"{c}.json"), d, ignore=()))
