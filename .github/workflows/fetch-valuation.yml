@@ -30,7 +30,7 @@ concurrency:
 jobs:
   fetch:
     runs-on: ubuntu-latest
-    timeout-minutes: 55                 # 5 + 15 + 15 + 12 minutes of steps at most
+    timeout-minutes: 62                 # 5 + 15 + 15 + 12 + 6 minutes of steps at most
     steps:
       - uses: actions/checkout@v4
 
@@ -87,3 +87,15 @@ jobs:
           for f in data/signals.json data/signals; do if [ -e "$f" ]; then git add "$f"; fi; done
           if git diff --cached --quiet; then echo "No signal changes to save."; else
             git commit -m "Update signals $(date -u +%F)" && git pull --rebase --quiet && git push; fi
+
+      - name: Update the backup hqcode table (all funds, a few minutes per run)
+        if: always()
+        timeout-minutes: 6                 # the script itself stops looking up after 3 minutes
+        run: python scripts/fetch_funds.py hqcodes
+
+      - name: Save the hqcode table
+        if: always()
+        run: |
+          if [ -e data/hqcode ]; then git add data/hqcode; fi
+          if git diff --cached --quiet; then echo "No hqcode changes to save."; else
+            git commit -m "Update hqcode table $(date -u +%F)" && git pull --rebase --quiet && git push; fi
