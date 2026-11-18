@@ -17,13 +17,18 @@ concurrency:
 jobs:
   evidence:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 55
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+
+      - name: "Map each fund to an index (第三期: tracked index, R², holdings look-through, NAV history)"
+        timeout-minutes: 15
+        continue-on-error: true            # the evidence below still runs with last week's map
+        run: python scripts/fetch_funds.py map
 
       - name: Compute evidence (rule comparison, event studies, grades)
         timeout-minutes: 30                # the script itself stops starting new indices after 25 minutes
@@ -34,6 +39,6 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          for f in data/evidence.json data/evidence; do if [ -e "$f" ]; then git add "$f"; fi; done
+          for f in data/evidence.json data/evidence data/funds_map.json data/history/fund_nav data/history/sw_members.json; do if [ -e "$f" ]; then git add "$f"; fi; done
           if git diff --cached --quiet; then echo "No evidence changes to save."; else
             git commit -m "Update evidence $(date -u +%F)" && git pull --rebase --quiet && git push; fi
