@@ -19,7 +19,7 @@ from datetime import datetime, timedelta
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import fetch_market as fm          # noqa: E402
 
-FUNDS_VERSION = "v1.1"
+FUNDS_VERSION = "v1.2"
 ALL_FUNDS_URL = "https://fund.eastmoney.com/js/fundcode_search.js"
 THS_LOOKUP = "https://fund.10jqka.com.cn/data/client/myfund/{codes}"
 THS_HEADERS = {"Referer": "https://fund.10jqka.com.cn/"}
@@ -40,7 +40,9 @@ ALIASES = {"沪深300": "000300", "中证500": "000905", "中证1000": "000852",
            "中证畜牧养殖": "930707", "中华交易服务半导体芯片行业": "990001", "恒生": "HKHSI", "恒生科技": "HKHSTECH", "恒生中国企业": "HKHSCEI",
            # v1.1 (first real run, 2026-11-19): sector indices whose names contain a broad index's name
            "中证全指信息技术": "000993", "中证全指医药卫生": "000991", "中证全指家用电器": "930697", "中证养老产业": "399812",
-           "中证红利低波动": "H30269", "中证红利低波动100": "930955"}
+           "中证红利低波动": "H30269", "中证红利低波动100": "930955",
+           # v1.2 (probe 13): 港股通高股息 has CSI close + PE from 2016-11; 消费红利 is in 蛋卷's table (CSIH30094)
+           "中证港股通高股息投资港元": "930914", "中证港股通高股息投资": "930914", "中证主要消费红利": "H30094"}
 SW_NAMES = {}                                   # filled from the signal monitor (申万一级 names → codes)
 
 
