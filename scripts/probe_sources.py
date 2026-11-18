@@ -1,74 +1,82 @@
 #!/usr/bin/env python3
 """
-Probe 12: does the 同花顺 estimate API give the SAME answer for the fund code as for its hqcode, for every fund in
-funds.txt? Read-only. Paste into scripts/probe_sources.py, run "Probe data sources", paste the whole log back.
+Probe 13: codes and data for the 港股 dividend / high-dividend / Hang Seng sector indices that some funds track. Read-only.
+Paste into scripts/probe_sources.py, run "Probe data sources", paste the whole log back.
+  A) Eastmoney search by name → code / market   B) CSI index-perf (close + PE)   C) Eastmoney daily K   D) 蛋卷 PE history
 """
+import json
 import re
 import time
+import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
 
 BJ = timezone(timedelta(hours=8))
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
-CODES = ['014530', '004788', '001051', '217027', '007593', '022424', '004194', '007474', '011612', '006909', '000071', '012348', '006327', '501311', '014519', '021142', '017610', '021049', '006195', '009051', '021550', '020602', '161725', '160222', '005235', '008928', '000248', '018201', '217017', '519714', '110022', '005827', '110011', '519002', '260108', '004424', '011309', '002982', '002978', '012323', '005064', '501009', '008284', '014424', '013416', '003095', '001717', '000727', '012159', '002974', '014855', '008888', '008282', '570008', '004070', '000251', '003634', '004224', '001475', '005609', '009068', '019164', '110025', '008702', '270002', '163406', '001938', '161005', '006435', '001410', '290011', '004616', '006624', '010381', '000326', '001257', '159601', '159967', '512770', '513050', '563180', '513910', '513830', '513060', '159883', '159939', '512760', '159806', '159652']
+NAMES = ["中证港股通央企红利", "中证港股通高股息投资", "中证高股息策略", "恒生港股通红利", "恒生港股通中国内地企业红利", "恒生消费", "恒生医疗保健",
+         "中证红利低波动", "中证全指信息技术", "中证养老产业"]
 
 
-def get(url, ref):
-    req = urllib.request.Request(url, headers={"User-Agent": UA, "Referer": ref})
-    with urllib.request.urlopen(req, timeout=25) as r:
+def get(url, ref, timeout=30):
+    req = urllib.request.Request(url, headers={"User-Agent": UA, "Referer": ref, "Accept": "application/json, */*"})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
         return r.read().decode("utf-8", "replace")
 
 
-def estimate(name, day):
-    body = get(f"https://gz-fund.10jqka.com.cn/?module=api&controller=index&action=chart&info=vm_fd_{name}&start={day}&_={int(time.time() * 1000)}",
-               "https://fund.10jqka.com.cn/")
-    m = re.match(r"\s*vm_fd_[^=]+=\s*'(.*)'\s*;?\s*$", body, re.S)
-    return m.group(1) if m else None
-
-
 def main():
-    now = datetime.now(BJ)
-    print(f"Probe 12 at {now.strftime('%Y-%m-%d %H:%M')} Beijing; {len(CODES)} codes\n")
-    hq = {}
-    for k in range(0, len(CODES), 10):
-        part = CODES[k:k + 10]
+    print(f"Probe 13 at {datetime.now(BJ).strftime('%Y-%m-%d %H:%M')} Beijing\n")
+    found = {}
+    print("=" * 100 + "\nA) Eastmoney search (index results only)")
+    for n in NAMES:
         try:
-            body = get("https://fund.10jqka.com.cn/data/client/myfund/" + ",".join(part), "https://fund.10jqka.com.cn/")
-            for c, h in re.findall(r'"code":"(\d{6})".*?"hqcode":"([^"]+)"', body):
-                hq[c] = h
+            url = ("https://searchapi.eastmoney.com/api/suggest/get?input=" + urllib.parse.quote(n)
+                   + "&type=14&token=D43BF722C8E33BDC906FB84D85E326E8&count=10")
+            j = json.loads(get(url, "https://www.eastmoney.com/"))
+            rows = ((j.get("QuotationCodeTable") or {}).get("Data")) or []
+            idx = [(r.get("Code"), r.get("Name"), r.get("QuoteID"), r.get("SecurityTypeName")) for r in rows]
+            print(f"  {n}: {idx[:6]}")
+            for code, name, qid, typ in idx:
+                if name and n.replace("中证", "").replace("恒生", "")[:4] in name.replace("中证", "").replace("恒生", "") and qid:
+                    found.setdefault(n, (code, qid))
+                    break
         except Exception as e:
-            print(f"  lookup {part[0]}…: ❌ {type(e).__name__}: {str(e)[:120]}")
+            print(f"  {n}: ❌ {type(e).__name__}: {str(e)[:120]}")
         time.sleep(0.6)
-    print(f"hqcode found for {len(hq)} of {len(CODES)} codes; equal to the code itself: {sorted(c for c, h in hq.items() if h == c)}\n")
-    day = now.strftime("%m%d")
-    stats = {"same": [], "different": [], "code_empty_hq_has": [], "code_has_hq_empty": [], "both_empty": [], "no_hqcode": [], "error": []}
-    for c in CODES:
+    print("\nmatched:", found)
+    print("=" * 100 + "\nB) CSI index-perf (last rows: close, PE) for 6-character codes")
+    end = datetime.now(BJ).strftime("%Y%m%d")
+    for n, (code, qid) in found.items():
+        if not re.fullmatch(r"[0-9A-Z]{6}", str(code)):
+            continue
         try:
-            a = estimate(c, day)
-            h = hq.get(c)
-            if not h:
-                last = a.split("|")[-1] if a else ""
-                stats["no_hqcode"].append((c, "data" if "~" in last and last.split("~", 1)[1].strip("~") else "empty"))
-                continue
-            b = a if h == c else estimate(h, day)
-            has = lambda s: bool(s) and "~" in s.split("|")[-1] and bool(s.split("|")[-1].split("~", 1)[1].strip("~"))
-            if has(a) and has(b):
-                stats["same" if a == b else "different"].append(c if a == b else (c, h, a[:60], b[:60]))
-            elif has(b):
-                stats["code_empty_hq_has"].append((c, h))
-            elif has(a):
-                stats["code_has_hq_empty"].append((c, h))
-            else:
-                stats["both_empty"].append((c, h))
+            j = json.loads(get(f"https://www.csindex.com.cn/csindex-home/perf/index-perf?indexCode={code}&startDate=20100101&endDate={end}",
+                               "https://www.csindex.com.cn/"))
+            d = j.get("data") or []
+            pe = [x for x in d if x.get("peg") not in (None, "", 0)]
+            print(f"  {n} {code}: {len(d)} rows from {d[0]['tradeDate'] if d else '-'}; PE rows {len(pe)} from {pe[0]['tradeDate'] if pe else '-'}; "
+                  f"last {({k: d[-1].get(k) for k in ('tradeDate', 'close', 'peg', 'tradingValue')} if d else '-')}")
         except Exception as e:
-            stats["error"].append((c, f"{type(e).__name__}: {str(e)[:80]}"))
-        time.sleep(0.4)
-    for k, v in stats.items():
-        print(f"{k}: {len(v)}")
-        if v and k != "same":
-            for x in v[:40]:
-                print(f"    {x}")
-    print("\nProbe 12 done. Please paste this whole log into the chat.")
+            print(f"  {n} {code}: ❌ {type(e).__name__}: {str(e)[:120]}")
+        time.sleep(0.6)
+    print("=" * 100 + "\nC) Eastmoney daily K by QuoteID")
+    for n, (code, qid) in found.items():
+        try:
+            j = json.loads(get(f"https://push2his.eastmoney.com/api/qt/stock/kline/get?secid={qid}&ut=bd1d9ddb04089700cf9c27f6f7426281"
+                               "&fields1=f1,f2,f3&fields2=f51,f53,f57&klt=101&fqt=1&beg=20000101&end=20500101&lmt=10000", "https://quote.eastmoney.com/"))
+            k = ((j.get("data") or {}).get("klines")) or []
+            print(f"  {n} {qid}: {len(k)} bars; first {k[0] if k else '-'}; last {k[-1] if k else '-'}")
+        except Exception as e:
+            print(f"  {n} {qid}: ❌ {type(e).__name__}: {str(e)[:120]}")
+        time.sleep(0.6)
+    print("=" * 100 + "\nD) 蛋卷: is any of them in the valuation table?")
+    try:
+        j = json.loads(get("https://danjuanfunds.com/djapi/index_eva/dj", "https://danjuanfunds.com/djmodule/value-center"))
+        items = ((j.get("data") or {}).get("items")) or []
+        hits = [(x.get("index_code"), x.get("name")) for x in items if any(w in str(x.get("name")) for w in ("红利", "股息", "港股", "恒生", "医疗", "消费"))]
+        print(f"  {len(items)} indices; related: {hits}")
+    except Exception as e:
+        print(f"  ❌ {type(e).__name__}: {str(e)[:120]}")
+    print("=" * 100 + "\nProbe 13 done. Please paste this whole log into the chat.")
 
 
 if __name__ == "__main__":
