@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Probe 16a (passive / enhanced / ETF funds): find each fund's REAL index from its name (passive: 跟踪标的; active: the main equity index of 业绩比较基准),
+Probe 16b (active / QDII / FOF funds): find each fund's REAL index from its name (passive: 跟踪标的; active: the main equity index of 业绩比较基准),
 by Eastmoney search → candidate index codes → price (CSI close + PE, else Eastmoney K-line) → R² against the fund's NAV.
 Only funds whose current mapping (data/funds_map.json) is not \"tracked\". Read-only; stops starting new funds after 8 min.
 Paste into scripts/probe_sources.py, run "Probe data sources", paste the whole log back.
@@ -102,9 +102,9 @@ def r2(a, b):
 
 
 def main():
-    print(f"Probe 16a at {datetime.now(BJ).strftime('%Y-%m-%d %H:%M')} Beijing\n")
+    print(f"Probe 16b at {datetime.now(BJ).strftime('%Y-%m-%d %H:%M')} Beijing\n")
     fmap = json.load(open(os.path.join(ROOT, "data", "funds_map.json"), encoding="utf-8"))["funds"]
-    todo = [c for c, f in fmap.items() if f.get("method") != "tracked" and f.get("kind") in ("passive", "enhanced", "etf")]   # part a: passive / enhanced / ETF funds
+    todo = [c for c, f in fmap.items() if f.get("method") != "tracked" and f.get("kind") in ("active", "fof", "qdii", "other")]   # part b: active / QDII / FOF funds
     print(f"{len(todo)} funds to check\n")
     summary = []
     for code in todo:
@@ -143,7 +143,7 @@ def main():
         time.sleep(0.5)
     ok = sum(1 for _, b in summary if b and b[5] and b[5] >= 80)
     print(f"\n{len(summary)} checked; best candidate R² ≥ 80 %: {ok}; took {time.monotonic() - T0:.0f}s")
-    print("Probe 16a done. Please paste this whole log into the chat.")
+    print("Probe 16b done. Please paste this whole log into the chat.")
 
 
 if __name__ == "__main__":
