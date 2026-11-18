@@ -28,7 +28,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import fetch_market as fm          # noqa: E402
 import fetch_signals as fs         # noqa: E402
 
-EVIDENCE_VERSION = "v1.1"
+EVIDENCE_VERSION = "v1.2"
 TIME_BUDGET = float(os.environ.get("EVIDENCE_TIME_BUDGET", 25 * 60))
 STARTED = time.monotonic()
 
@@ -47,6 +47,9 @@ C_REDEEM = [(7, 0.015)]
 GROUPS = ["宽基", "港股", "周期与金融", "稳定与成长", "其他行业"]
 
 HORIZONS = (20, 60, 120)
+# price-only part over the whole price history (v1.2, agreed 2026-11-19): rules and events that need no valuation
+LONG_STRATEGIES = ["always", "cross", "cross_trend"]
+LONG_EVENTS = ["金叉", "死叉", "回踩", "发散向上", "发散向下", "周线绿柱缩短过半", "周线翻红"]
 SPLIT = "2016-01-01"                          # the two periods of §8.11
 STRATEGIES = ["always", "cross", "cross_trend", "v1", "v2", "v3", "v3_weekly"]
 STRATEGY_NAMES = {"always": "一直满仓", "cross": "仅 20/51", "cross_trend": "20/51 + 趋势过滤", "v1": "仓位计划 v1",
@@ -373,10 +376,11 @@ def group_grade(pooled_grade, gg, checks):
     return gg, checks
 
 
-def pool(per_index, name, h=60, codes=None):
-    """Pool the independent events of one signal over all indices, or over `codes` (each event keeps its own baseline)."""
+def pool(per_index, name, h=60, codes=None, part=None):
+    """Pool the independent events of one signal over all indices, or over `codes` (each event keeps its own baseline).
+    part="long": the price-only, whole-history results."""
     rows = []
-    per_index = {c: R for c, R in per_index.items() if codes is None or c in codes}
+    per_index = {c: (R[part] if part else R) for c, R in per_index.items() if codes is None or c in codes}
     for code, R in per_index.items():
         x = R["events"].get(name)
         if not x:
@@ -499,14 +503,29 @@ def evaluate(item, a_dates):
         curves[key] = sim["value"]
         comp_c[key] = metrics(dates, simulate(dates, closes, ds, exec_ok, start, hk=hk, share="C"), start)
     base = {d: {h: baseline(closes, exec_ok, start, d, h) for h in HORIZONS} for d in (1, -1)}
+    # price-only, whole history: from the first day the trend (MA250 and its slope) exists
+    start_long = next((i for i in range(n) if A["trend"][i] is not None), start)
+    comp_long, events_long = {}, {}
+    for key in LONG_STRATEGIES:
+        ds_ = {"always": changes_only([1.0] * n, start_long), "cross": changes_only(cross_decisions(A, n, False), start_long),
+               "cross_trend": changes_only(cross_decisions(A, n, True), start_long)}[key]
+        comp_long[key] = metrics(dates, simulate(dates, closes, ds_, exec_ok, start_long, hk=hk), start_long)
+    base_long = {d: {h: baseline(closes, exec_ok, start_long, d, h) for h in HORIZONS} for d in (1, -1)}
     sig = signal_days(A, wk_events, n)
+    for name, (d, days) in sig.items():
+        if name in LONG_EVENTS:
+            days = [i for i in days if i >= start_long]
+            rows = {h: study(closes, dates, exec_ok, days, d, h) for h in HORIZONS}
+            events_long[name] = {"dir": d, "rows": rows,
+                                 "stats": {h: summarize([x for x in rows[h] if x["indep"]], d, base_long[d][h]) for h in HORIZONS}}
     events = {}
     for name, (d, days) in sig.items():
         days = [i for i in days if i >= start]
         rows = {h: study(closes, dates, exec_ok, days, d, h) for h in HORIZONS}
         events[name] = {"dir": d, "rows": rows,
                         "stats": {h: summarize([x for x in rows[h] if x["indep"]], d, base[d][h]) for h in HORIZONS}}
-    return {"A": A, "start": start, "comp": comp, "comp_c": comp_c, "curves": curves, "base": base, "events": events,
+    return {"A": A, "start": start, "comp": comp, "comp_c": comp_c, "curves": curves, "comp_long": comp_long,
+            "long": {"events": events_long, "base": base_long, "from": dates[start_long]}, "base": base, "events": events,
             "crashes": crashes(dates, closes, A, exec_ok), "fib": fib_days(dates, closes), "exec_ok": exec_ok}
 
 
@@ -630,6 +649,24 @@ def build(items, today_text):
     egroup = {it["code"]: it.get("egroup") for it in items}
     summary = {"A": comp_summary("comp", list(per)), "C": comp_summary("comp_c", list(per)),
                "groups": {g: comp_summary("comp", [c for c in per if egroup.get(c) == g]) for g in GROUPS}}
+    # price-only, whole history
+    long_signals = []
+    for nm in LONG_EVENTS:
+        pooled, share = pool(per, nm, 60, part="long")
+        if not pooled.get("n"):
+            continue
+        g, checks = grade(pooled, share)
+        long_signals.append({"name": nm, "dir": pooled.get("dir"), "grade": g, "checks": checks, "pooled": pooled, "share_ok": round(share, 2),
+                             "by_index": {c: {60: {k: R["long"]["events"][nm]["stats"][60].get(k) for k in ("n", "win", "median", "base_win", "base_median")}}
+                                          for c, R in per.items() if nm in R["long"]["events"]}})
+    long_summary = {}
+    for k in LONG_STRATEGIES[1:]:
+        rows = [(R["comp_long"][k], R["comp_long"]["always"]) for R in per.values() if R["comp_long"].get(k) and R["comp_long"].get("always")]
+        if rows:
+            long_summary[k] = {"indices": len(rows), "mdd_better": sum(1 for a, b in rows if a["mdd"] > b["mdd"]),
+                               "cagr_better": sum(1 for a, b in rows if a["cagr"] > b["cagr"]),
+                               "median_cagr_gap": round(statistics.median(a["cagr"] - b["cagr"] for a, b in rows), 2),
+                               "median_mdd_gap": round(statistics.median(a["mdd"] - b["mdd"] for a, b in rows), 2)}
     fib = {}
     for r, xs in fib_pool.items():
         if xs:
@@ -645,13 +682,15 @@ def build(items, today_text):
     xs = [c["v3_first_add"]["vs_bottom"] for c in crash_rows if c["v3_first_add"]]
     crash_sum["v3_vs_bottom_median"] = r1(statistics.median(xs)) if xs else None
     indices = [{"code": c, "name": next(it["name"] for it in items if it["code"] == c), "group": next(it["group"] for it in items if it["code"] == c),
-                "egroup": egroup.get(c), "comparison": R["comp"], "comparison_c": R["comp_c"],
+                "egroup": egroup.get(c), "comparison": R["comp"], "comparison_c": R["comp_c"], "comparison_long": R["comp_long"],
+                "long_from": R["long"]["from"],
                 "base60": {"buy": R["base"][1][60], "sell": R["base"][-1][60]}} for c, R in per.items()]
     doc = {"schema": 1, "version": EVIDENCE_VERSION, "generated_beijing": today_text, "rules": fs.RULES,
            "costs": {"A": {"buy": BUY_FEE, "redeem": REDEEM}, "C": {"buy": 0, "redeem": C_REDEEM, "service_fee": C_SERVICE_FEE},
                      "cash_yield": CASH_YIELD, "hk_settle_days": HK_SETTLE_DAYS, "round_trip_for_grades": ROUND_TRIP}, "groups": GROUPS,
            "strategies": STRATEGY_NAMES, "summary": summary, "signals": signals, "indices": indices,
-           "extra": {"crashes": crash_rows, "crash_summary": crash_sum, "fib": fib}, "errors": errors}
+           "extra": {"crashes": crash_rows, "crash_summary": crash_sum, "fib": fib},
+           "long": {"strategies": LONG_STRATEGIES, "summary": long_summary, "signals": long_signals}, "errors": errors}
     return doc, details
 
 
