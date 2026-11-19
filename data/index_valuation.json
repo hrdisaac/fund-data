@@ -1,8 +1,8 @@
 {
  "source": "蛋卷基金 index_eva (data from Wind) — personal use",
  "source_url": "https://danjuanfunds.com/djapi/index_eva/dj",
- "fetched_at_utc": "2026-11-19T14:26:44+00:00",
- "fetched_at_beijing": "2026-11-19 22:26:44",
+ "fetched_at_utc": "2026-11-19T16:01:20+00:00",
+ "fetched_at_beijing": "2026-11-20 00:01:20",
  "percent_fields_are": "percent (0–100)",
  "count": 63,
  "fields_seen": [
@@ -179,11 +179,11 @@
   {
    "code": "CSIH30533",
    "name": "中概互联50",
-   "pe": 13.832,
-   "pb": 1.701,
+   "pe": 12.862,
+   "pb": 1.647,
    "pe_pct": 0.0,
    "pb_pct": 0.0,
-   "roe": 12.3,
+   "roe": 12.81,
    "dividend_yield": 1.31,
    "eva_type": "low",
    "date": "11-19"
@@ -251,11 +251,11 @@
   {
    "code": "HKHSTECH",
    "name": "恒生科技",
-   "pe": 18.631,
-   "pb": 1.891,
-   "pe_pct": 4.89,
-   "pb_pct": 0.65,
-   "roe": 10.15,
+   "pe": 17.093,
+   "pb": 1.836,
+   "pe_pct": 1.89,
+   "pb_pct": 0.46,
+   "roe": 10.74,
    "dividend_yield": 1.29,
    "eva_type": "low",
    "date": "11-19"
