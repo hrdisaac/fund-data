@@ -9,6 +9,8 @@ Fund-level data for the fund viewer (第三期). Standard library only; runs in 
 """
 import bisect
 import json
+import threading
+from concurrent.futures import ThreadPoolExecutor
 import urllib.parse
 import math
 import os
@@ -19,8 +21,9 @@ from datetime import datetime, timedelta
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import fetch_market as fm          # noqa: E402
+import fetch_signals as fs         # noqa: E402  (the monitor's own lists: indices already there need no add)
 
-FUNDS_VERSION = "v1.6"
+FUNDS_VERSION = "v1.8"
 ALL_FUNDS_URL = "https://fund.eastmoney.com/js/fundcode_search.js"
 THS_LOOKUP = "https://fund.10jqka.com.cn/data/client/myfund/{codes}"
 THS_HEADERS = {"Referer": "https://fund.10jqka.com.cn/"}
@@ -45,7 +48,9 @@ ALIASES = {"沪深300": "000300", "中证500": "000905", "中证1000": "000852",
            # v1.2 (probe 13): 港股通高股息 has CSI close + PE from 2016-11; 消费红利 is in 蛋卷's table (CSIH30094)
            "中证港股通高股息投资港元": "930914", "中证港股通高股息投资": "930914", "中证主要消费红利": "H30094",
            # v1.3 (probe 14): CSI codes confirmed with close + PE; v1.1 codes 000993 / 000991 / 930697 / 399812 / 930955 also confirmed
-           "中证港股通央企红利": "931233", "中证高股息策略": "931053"}
+           "中证港股通央企红利": "931233", "中证高股息策略": "931053",
+           # v1.8: benchmark indices of active funds (search found the wrong one or none)
+           "中证医药卫生": "000933", "沪深300金融地产行业": "000914", "沪深300金融地产": "000914", "中证TMT产业主题": "000998"}
 SW_NAMES = {}                                   # filled from the signal monitor (申万一级 names → codes)
 SEARCH_URL = ("https://searchapi.eastmoney.com/api/suggest/get?input={q}&type=14&token=D43BF722C8E33BDC906FB84D85E326E8&count=20")
 CSI_PERF = "https://www.csindex.com.cn/csindex-home/perf/index-perf?indexCode={code}&startDate={start}&endDate={end}"
@@ -53,6 +58,7 @@ EM_KLINE = ("https://push2his.eastmoney.com/api/qt/stock/kline/get?secid={qid}&u
             "&fields1=f1,f2,f3&fields2=f51,f53&klt=101&fqt=1&beg={start}&end=20500101&lmt=400")
 R2_PASSIVE = 90                                 # a searched index must fit a passive fund this well to count as its real index
 MAP_BUDGET = float(os.environ.get("FUNDS_MAP_BUDGET", 3000))  # only a safety net (50 min): a full first run takes ≈ 25–30 min; the rest keep last week's rows
+WORKERS = 4                                     # v1.7: four funds at a time (each request still paced)
 RESOLVE_DAYS = 30                               # a name already resolved is searched again only after 30 days (or when the name changes)
 BENCH_SLACK = 5                                 # an active fund uses its benchmark index if R² ≥ 80 % and ≤ 5 points below the best
 
@@ -240,22 +246,24 @@ def search_variants(name):
     n = norm(name).replace("低波动", "低波")
     out = [n]
     short = []
-    for pre in ("中证全指", "中证", "国证", "中华交易服务", "上证", "深证", "恒生"):
+    for pre, keep in (("中证全指", "全指"), ("沪深300", "300"), ("中证800", "800"), ("中证", ""), ("国证", ""), ("中华交易服务", ""),
+                      ("上证", ""), ("深证", ""), ("恒生", "")):
         if n.startswith(pre) and len(n) > len(pre) + 1:
-            short.append(("全指" if pre == "中证全指" else "") + n[len(pre):])
+            short.append(keep + n[len(pre):])                  # 沪深300金融地产 → 300金融地产, 中证800成长 → 800成长
             break
     out += short
-    for x in list(out):
-        for suf in ("行业", "产业", "主题", "成份"):
+    # first four characters only of the name WITHOUT its prefix ("中证全指…" → "全指信息", never "中证全指" / "中证红利") —
+    # Eastmoney's short names usually look like this, so they come before the suffix variants
+    out += [x[:4] for x in short if len(x) > 4]
+    for x in [n] + short:
+        for suf in ("产业主题", "行业", "产业", "主题", "成份"):
             if x.endswith(suf) and len(x) > len(suf) + 1:
                 out.append(x[:-len(suf)])
-    # first four characters only of the name WITHOUT its prefix ("中证全指…" → "全指信息", never "中证全指" / "中证红利")
-    out += [x[:4] for x in short if len(x) > 4]
     seen, res = set(), []
     for x in out:
         if x and x not in seen:
             seen.add(x); res.append(x)
-    return res[:6]
+    return res[:10]
 
 
 def index_prices(code, qid, today):
@@ -385,21 +393,31 @@ def build_map(today):
     fresh = (today - timedelta(days=RESOLVE_DAYS)).isoformat()
     codes = sorted(codes, key=lambda c: (prev.get(c) or {}).get("updated", ""))   # the oldest first (a stopped run continues)
     stopped = 0
-    for code in codes:
+    lock = threading.Lock()
+
+    def one(code):
+        nonlocal stopped
         name, ftype = allf.get(code, ("", ""))
         kind = classify(code, name, ftype)
         old = prev.get(code) or {}
         if time.monotonic() - t0 > MAP_BUDGET:
-            stopped += 1
+            with lock:
+                stopped += 1
             if old:
                 funds[code] = {**old, "stale": True}
-            continue
+            return
         row = {"name": name, "type": ftype, "kind": kind, "tracked": "", "index": None, "method": "none", "r2": None, "r2_index": None,
                "updated": today.isoformat()}
         reuse = old.get("resolved_on", "") >= fresh
         try:
-            info = f10(code) if kind in ("passive", "enhanced", "etf", "active", "fof", "qdii") else {"跟踪标的": "", "业绩比较基准": ""}
+            if old.get("f10_on", "") >= fresh and "benchmark_full" in old:     # v1.7: 跟踪标的 / 基准 cached for 30 days
+                info = {"跟踪标的": old.get("tracked", ""), "业绩比较基准": old["benchmark_full"]}
+                row["f10_on"] = old["f10_on"]
+            else:
+                info = f10(code) if kind in ("passive", "enhanced", "etf", "active", "fof", "qdii") else {"跟踪标的": "", "业绩比较基准": ""}
+                row["f10_on"] = today.isoformat()
             row["benchmark"] = info["业绩比较基准"][:80]
+            row["benchmark_full"] = info["业绩比较基准"][:400]
             if kind in ("passive", "enhanced", "etf", "active", "fof", "qdii"):
                 fm.pause()
                 ds, vs = nav_history(code)
@@ -444,7 +462,7 @@ def build_map(today):
                                 except Exception as e:
                                     log(f"      benchmark {ic}: prices not available ({type(e).__name__})")
                                 fm.pause()
-                        elif reuse and (old.get("bench") or {}).get("name") == b[0] and old.get("bench_found"):
+                        elif reuse and (old.get("bench") or {}).get("name") == b[0] and "bench_found" in old:   # v1.7: also when not found
                             bf = old["bench_found"]; row["resolved_on"] = old["resolved_on"]
                         else:
                             bf = resolve(b[0], fund, today, mon_closes); row["resolved_on"] = today.isoformat()
@@ -483,6 +501,27 @@ def build_map(today):
             + (f", waiting for {row['pending_index']} to be monitored" if row.get("pending_index") else "")
             + (", kept from last week" if row.get("stale") else "") + f"{'' if row['r2'] is None else ', R² ' + str(row['r2']) + '% vs ' + str(row['r2_index'])})"
             + (f"; look-through {row['look'][:3]}" if row.get("look") else ""))
+    with ThreadPoolExecutor(max_workers=WORKERS) as ex:
+        list(ex.map(one, codes))
+    funds = dict(sorted(funds.items()))
+    # v1.8: add_indices = every index a fund needs that is not one of the monitor's own (broad / 港股 / 申万 / indices.txt).
+    # Before, an index left the list once it was monitored — and so left the monitor again the next day (it flipped between
+    # "tracked", "不适用" and the closest-index fallback).
+    core = {b[0] for b in fs.BROAD} | {h[0] for h in fs.HK} | set(fm.read_index_codes(fm.INDICES_FILE))
+    need = {}
+    for r in funds.values():
+        for c, info in ((r.get("index"), r.get("found") if (r.get("found") or {}).get("code") == r.get("index") else None),
+                        (r.get("pending_index"), r.get("found")),
+                        ((r.get("bench") or {}).get("code") if r.get("method") == "benchmark" or ((r.get("bench") or {}).get("r2") or 0) >= R2_USE * 100 else None,
+                         r.get("bench_found"))):
+            if not c or c in core or str(c).startswith("801") or c in need:
+                continue
+            e = add.get(c) or {k: (info or {}).get(k) for k in ("code", "qid", "name", "source")}
+            e["code"] = c
+            if not e.get("source"):
+                e["source"] = "csi" if re.fullmatch(r"[0-9A-Z]{6}", str(c)) else "em"
+            need[c] = e
+    add = need
     doc = {"schema": 1, "version": FUNDS_VERSION, "generated_beijing": datetime.now(fm.BJ).strftime("%Y-%m-%d %H:%M:%S"),
            "funds": funds, "add_indices": [add[k] for k in sorted(add)], "errors": errors,
            "rules": {"r2_use": R2_USE * 100, "r2_ref": R2_REF * 100, "r2_days": R2_DAYS}}
