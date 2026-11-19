@@ -17,7 +17,7 @@ concurrency:
 jobs:
   evidence:
     runs-on: ubuntu-latest
-    timeout-minutes: 55
+    timeout-minutes: 100
     steps:
       - uses: actions/checkout@v4
 
@@ -26,7 +26,7 @@ jobs:
           python-version: '3.12'
 
       - name: "Map each fund to an index (第三期: tracked index, R², holdings look-through, NAV history)"
-        timeout-minutes: 15
+        timeout-minutes: 60                # a full first run takes ≈ 25–30 min; the script stops starting new funds after 50 min and saves
         continue-on-error: true            # the evidence below still runs with last week's map
         run: python scripts/fetch_funds.py map
 
