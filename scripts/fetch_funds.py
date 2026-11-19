@@ -20,7 +20,7 @@ from datetime import datetime, timedelta
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import fetch_market as fm          # noqa: E402
 
-FUNDS_VERSION = "v1.4"
+FUNDS_VERSION = "v1.5.1"
 ALL_FUNDS_URL = "https://fund.eastmoney.com/js/fundcode_search.js"
 THS_LOOKUP = "https://fund.10jqka.com.cn/data/client/myfund/{codes}"
 THS_HEADERS = {"Referer": "https://fund.10jqka.com.cn/"}
@@ -52,6 +52,8 @@ CSI_PERF = "https://www.csindex.com.cn/csindex-home/perf/index-perf?indexCode={c
 EM_KLINE = ("https://push2his.eastmoney.com/api/qt/stock/kline/get?secid={qid}&ut=bd1d9ddb04089700cf9c27f6f7426281"
             "&fields1=f1,f2,f3&fields2=f51,f53&klt=101&fqt=1&beg={start}&end=20500101&lmt=400")
 R2_PASSIVE = 90                                 # a searched index must fit a passive fund this well to count as its real index
+MAP_BUDGET = float(os.environ.get("FUNDS_MAP_BUDGET", 3000))  # only a safety net (50 min): a full first run takes ≈ 25–30 min; the rest keep last week's rows
+RESOLVE_DAYS = 30                               # a name already resolved is searched again only after 30 days (or when the name changes)
 BENCH_SLACK = 5                                 # an active fund uses its benchmark index if R² ≥ 80 % and ≤ 5 points below the best
 
 
@@ -277,11 +279,12 @@ def index_prices(code, qid, today):
 
 def resolve(name, fund, today, monitored):
     """Index name → the best candidate {code, qid, name, source, pe_from, r2} by Eastmoney search + R² against the fund."""
-    cands = []
+    cands, notes = [], []
     for q in search_variants(name):
         try:
             j = fm.get_json(SEARCH_URL.format(q=urllib.parse.quote(q)), {"Referer": "https://www.eastmoney.com/"}, attempts=2, timeout=25)
-        except Exception:
+        except Exception as e:
+            notes.append(f"search \"{q}\": {type(e).__name__}")
             continue
         rows = [(str(r.get("Code")), str(r.get("Name")), str(r.get("QuoteID"))) for r in ((j or {}).get("QuotationCodeTable") or {}).get("Data") or []
                 if r.get("SecurityTypeName") == "指数" and r.get("QuoteID")]
@@ -297,15 +300,18 @@ def resolve(name, fund, today, monitored):
         else:
             try:
                 ds, cl, src, pe = index_prices(code, qid, today)
-            except Exception:
+            except Exception as e:
+                notes.append(f"{code} prices: {type(e).__name__}")
                 continue
             fit = r2(fund[0], fund[1], (ds, cl))
             cand = {"code": code, "qid": qid, "name": nm, "source": src, "pe_from": pe, "r2": fit}
+        notes.append(f"{code} {nm} R² {None if fit is None else round(fit * 100, 1)}")
         if fit is not None and (best is None or fit > best["r2"]):
             best = cand
         fm.pause()
     if best:
         best["r2"] = round(best["r2"] * 100, 1)
+    log(f"      resolve \"{name[:24]}\": {'; '.join(notes) or 'no index found by search'}")
     return best
 
 
@@ -371,10 +377,26 @@ def build_map(today):
         log(f"申万 members not available ({type(e).__name__}: {str(e)[:100]}): no look-through this run")
     funds, add, errors = {}, {}, {}
     mon_closes = {c: closes.get(c) for c in monitored}
+    prev_doc = fm.read_json(os.path.join(fm.DATA_DIR, "funds_map.json"), {}) or {}
+    prev = prev_doc.get("funds") or {}
+    for x in prev_doc.get("add_indices") or []:                 # indices still waiting to be monitored stay on the list
+        if isinstance(x, dict) and x.get("code") and x["code"] not in monitored:
+            add[x["code"]] = x
+    fresh = (today - timedelta(days=RESOLVE_DAYS)).isoformat()
+    codes = sorted(codes, key=lambda c: (prev.get(c) or {}).get("updated", ""))   # the oldest first (a stopped run continues)
+    stopped = 0
     for code in codes:
         name, ftype = allf.get(code, ("", ""))
         kind = classify(code, name, ftype)
-        row = {"name": name, "type": ftype, "kind": kind, "tracked": "", "index": None, "method": "none", "r2": None, "r2_index": None}
+        old = prev.get(code) or {}
+        if time.monotonic() - t0 > MAP_BUDGET:
+            stopped += 1
+            if old:
+                funds[code] = {**old, "stale": True}
+            continue
+        row = {"name": name, "type": ftype, "kind": kind, "tracked": "", "index": None, "method": "none", "r2": None, "r2_index": None,
+               "updated": today.isoformat()}
+        reuse = old.get("resolved_on", "") >= fresh
         try:
             info = f10(code) if kind in ("passive", "enhanced", "etf", "active", "fof", "qdii") else {"跟踪标的": "", "业绩比较基准": ""}
             row["benchmark"] = info["业绩比较基准"][:80]
@@ -392,12 +414,16 @@ def build_map(today):
                     row["tracked"] = info["跟踪标的"]
                     ic = match_tracked(info["跟踪标的"], names) or sw_code(info["跟踪标的"])
                     found = {"code": ic, "qid": None, "name": info["跟踪标的"], "source": "alias"} if ic else None
-                    if not found and info["跟踪标的"] and "无跟踪标的" not in info["跟踪标的"]:
+                    if not found and reuse and old.get("tracked") == info["跟踪标的"] and "found" in old:
+                        found = old.get("found")                       # resolved within 30 days: no new search
+                        row["resolved_on"] = old["resolved_on"]
+                    elif not found and info["跟踪标的"] and "无跟踪标的" not in info["跟踪标的"]:
                         found = resolve(info["跟踪标的"], fund, today, mon_closes)
                         if found and (found["r2"] or 0) < R2_PASSIVE:
                             found = None
+                        row["resolved_on"] = today.isoformat()
+                    row["found"] = found
                     if found:
-                        row["found"] = found
                         if found["code"] in monitored:
                             row["index"], row["method"] = found["code"], "tracked"
                         else:
@@ -407,9 +433,17 @@ def build_map(today):
                     b = bench_main(info["业绩比较基准"])
                     if b:
                         ic = match_tracked(b[0], names) or sw_code(b[0])
-                        bf = ({"code": ic, "qid": None, "name": b[0], "source": "alias",
-                               "r2": round(r2(ds, vs, closes[ic]) * 100, 1) if ic in closes and r2(ds, vs, closes[ic]) is not None else None}
-                              if ic else resolve(b[0], fund, today, mon_closes))
+                        if ic:
+                            bf = {"code": ic, "qid": None, "name": b[0], "source": "alias",
+                                  "r2": round(r2(ds, vs, closes[ic]) * 100, 1) if ic in closes and r2(ds, vs, closes[ic]) is not None else None}
+                        elif reuse and (old.get("bench") or {}).get("name") == b[0] and old.get("bench_found"):
+                            bf = old["bench_found"]; row["resolved_on"] = old["resolved_on"]
+                        else:
+                            bf = resolve(b[0], fund, today, mon_closes); row["resolved_on"] = today.isoformat()
+                        if bf and bf["code"] in closes:                 # refresh the fit against a monitored index every week
+                            fit = r2(ds, vs, closes[bf["code"]])
+                            bf = {**bf, "r2": None if fit is None else round(fit * 100, 1)}
+                        row["bench_found"] = bf
                         if bf:
                             row["bench"] = {"code": bf["code"], "name": b[0], "weight": b[1], "r2": bf.get("r2")}
                             if bf["code"] not in monitored and (bf.get("r2") or 0) >= R2_USE * 100:
@@ -433,9 +467,13 @@ def build_map(today):
                 row["look_period"] = h.get("period") or h.get("report_date") or ""
         except Exception as e:
             errors[code] = f"{type(e).__name__}: {e}"[:160]
-            log(f"  {code}: {errors[code]}")
+            log(f"  {code}: {errors[code]}" + (" — last week's row kept" if old else ""))
+            if old:                                                  # a failure this week does not erase what was known
+                row = {**old, "stale": True}
         funds[code] = row
-        log(f"  {code} {name[:14]} [{kind}] → {row['index'] or '-'} ({row['method']}{'' if row['r2'] is None else ', R² ' + str(row['r2']) + '% vs ' + str(row['r2_index'])})"
+        log(f"  {code} {name[:14]} [{kind}] → {row['index'] or '-'} ({row['method']}"
+            + (f", waiting for {row['pending_index']} to be monitored" if row.get("pending_index") else "")
+            + (", kept from last week" if row.get("stale") else "") + f"{'' if row['r2'] is None else ', R² ' + str(row['r2']) + '% vs ' + str(row['r2_index'])})"
             + (f"; look-through {row['look'][:3]}" if row.get("look") else ""))
     doc = {"schema": 1, "version": FUNDS_VERSION, "generated_beijing": datetime.now(fm.BJ).strftime("%Y-%m-%d %H:%M:%S"),
            "funds": funds, "add_indices": [add[k] for k in sorted(add)], "errors": errors,
@@ -444,7 +482,8 @@ def build_map(today):
     by = {}
     for r in funds.values():
         by[r["method"]] = by.get(r["method"], 0) + 1
-    log(f"funds_map.json {'saved' if saved else 'unchanged'}: {len(funds)} funds, {by}; indices to add {sorted(add)}; took {time.monotonic() - t0:.0f}s")
+    log(f"funds_map.json {'saved' if saved else 'unchanged'}: {len(funds)} funds, {by}; indices to add {sorted(add)}; "
+        f"{stopped} not reached this run (time budget; last week's rows kept); took {time.monotonic() - t0:.0f}s")
     return doc
 
 
