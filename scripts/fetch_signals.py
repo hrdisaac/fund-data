@@ -27,7 +27,7 @@ from datetime import date, datetime, timedelta
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import fetch_market as fm                                   # noqa: E402  (shared helpers: HTTP, 申万 history, JSON files)
 
-SIGNALS_VERSION = "v1.5"
+SIGNALS_VERSION = "v1.6"
 RULES = "第一期定稿（2026-11-18：v3 分档时机、按波动缩放、行业估值依据）"
 TIME_BUDGET = float(os.environ.get("SIGNALS_TIME_BUDGET", 8 * 60))
 STARTED = time.monotonic()
@@ -1033,9 +1033,17 @@ def main():
     # 第三期: indices that the user's passive funds track (data/funds_map.json, written weekly by fetch_funds.py map)
     fmap = fm.read_json(os.path.join(fm.DATA_DIR, "funds_map.json"), {}) or {}
     hk_codes = {h[0] for h in HK}
+    em_extra = []                                   # v1.6: indices with Eastmoney prices only (国证, 恒生 sector …): trend only
     for c in (fmap.get("add_indices") or [])[:30]:
-        if re.fullmatch(r"[0-9A-Z]{6}", str(c)) and c not in extra and c not in {b[0] for b in BROAD} and c not in hk_codes:
-            extra.append(c)
+        d = c if isinstance(c, dict) else {"code": c, "source": "csi"}
+        code = str(d.get("code") or "")
+        if code in extra or code in {b[0] for b in BROAD} or code in hk_codes:
+            continue
+        if d.get("source") == "em":
+            if re.fullmatch(r"[0-9A-Z]{3,10}", code) and re.fullmatch(r"\d{1,3}\.[0-9A-Za-z]{1,12}", str(d.get("qid") or "")):
+                em_extra.append((code, str(d.get("name") or code)[:20], d["qid"]))
+        elif re.fullmatch(r"[0-9A-Z]{6}", code):
+            extra.append(code)
     for code, name, psrc, vsrc in BROAD + [(c, "", "csi", "csi") for c in extra]:
         if time_left() < 30:
             errors[code] = "time budget used up"
@@ -1055,6 +1063,17 @@ def main():
                 name2, src, vs, has_pb = name, "东方财富日 K（收盘、成交额）", "蛋卷 PE / PB（周度）", "avg"
             return build_entry(code, name2, group, src, ds, cl, am, vo, has_pb, vs, fill)
         finish(code, group, job)
+        fm.pause()
+
+    for code, name, qid in em_extra:                         # price only: trend and regime, no valuation → 不给建议
+        if time_left() < 30:
+            errors[code] = "time budget used up"
+            continue
+
+        def job(code=code, name=name, qid=qid):
+            ds, cl, am = fetch_em(qid)
+            return build_entry(code, name, "自选", f"东方财富日 K（{qid}，只有价格，没有估值）", ds, cl, am, [], "pe_only", "无估值数据")
+        finish(code, "自选", job)
         fm.pause()
 
     for code, name, secids, dj, basis in HK:                 # 港股: Eastmoney prices (HK trading days), 蛋卷 weekly PE / PB
