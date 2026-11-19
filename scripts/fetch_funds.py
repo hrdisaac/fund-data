@@ -20,7 +20,7 @@ from datetime import datetime, timedelta
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import fetch_market as fm          # noqa: E402
 
-FUNDS_VERSION = "v1.5.1"
+FUNDS_VERSION = "v1.6"
 ALL_FUNDS_URL = "https://fund.eastmoney.com/js/fundcode_search.js"
 THS_LOOKUP = "https://fund.10jqka.com.cn/data/client/myfund/{codes}"
 THS_HEADERS = {"Referer": "https://fund.10jqka.com.cn/"}
@@ -436,6 +436,14 @@ def build_map(today):
                         if ic:
                             bf = {"code": ic, "qid": None, "name": b[0], "source": "alias",
                                   "r2": round(r2(ds, vs, closes[ic]) * 100, 1) if ic in closes and r2(ds, vs, closes[ic]) is not None else None}
+                            if ic not in closes:                       # v1.6: a known benchmark index not monitored yet → fit from CSI prices
+                                try:
+                                    ids, icl, isrc, _ = index_prices(ic, None, today)
+                                    fit = r2(ds, vs, (ids, icl))
+                                    bf.update({"r2": None if fit is None else round(fit * 100, 1), "source": "csi" if isrc == "csi" else "alias"})
+                                except Exception as e:
+                                    log(f"      benchmark {ic}: prices not available ({type(e).__name__})")
+                                fm.pause()
                         elif reuse and (old.get("bench") or {}).get("name") == b[0] and old.get("bench_found"):
                             bf = old["bench_found"]; row["resolved_on"] = old["resolved_on"]
                         else:
