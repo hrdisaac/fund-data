@@ -25,6 +25,18 @@ jobs:
         with:
           python-version: '3.12'
 
+      # Intermediate data (fund NAV histories, 申万 constituents) live in the Actions cache, not in the repository: they are
+      # rebuilt every week anyway, and committing them made the git history grow by megabytes a week.
+      - name: Restore the intermediate data (Actions cache)
+        uses: actions/cache@v4
+        with:
+          path: |
+            data/history/fund_nav
+            data/history/sw_members.json
+          key: fund-intermediate-${{ github.run_id }}
+          restore-keys: |
+            fund-intermediate-
+
       - name: "Map each fund to an index (第三期: tracked index, R², holdings look-through, NAV history)"
         timeout-minutes: 60                # a full first run takes ≈ 25–30 min; the script stops starting new funds after 50 min and saves
         continue-on-error: true            # the evidence below still runs with last week's map
@@ -39,6 +51,8 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          for f in data/evidence.json data/evidence data/funds_map.json data/history/fund_nav data/history/sw_members.json; do if [ -e "$f" ]; then git add "$f"; fi; done
+          # stop tracking the intermediate files once (they stay on disk for the cache)
+          git rm -r -q --cached --ignore-unmatch data/history/fund_nav data/history/sw_members.json
+          for f in data/evidence.json data/evidence data/funds_map.json; do if [ -e "$f" ]; then git add "$f"; fi; done
           if git diff --cached --quiet; then echo "No evidence changes to save."; else
             git commit -m "Update evidence $(date -u +%F)" && git pull --rebase --quiet && git push; fi
