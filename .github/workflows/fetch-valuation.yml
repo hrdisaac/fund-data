@@ -16,7 +16,7 @@ on:
     #   23:30 UTC daily   = 07:30 Beijing: second chance; catches anything published overnight (also refreshes holdings)
     - cron: '30 8 * * 1-5'
     - cron: '30 11 * * 1-5'
-    - cron: '30 14 * * *'
+    - cron: '0 15 * * *'      # 23:00 Beijing every day: the day's final signals, visible before midnight
     - cron: '30 23 * * *'
   workflow_dispatch:        # adds a "Run workflow" button for manual runs
 
