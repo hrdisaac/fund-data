@@ -1,13 +1,9 @@
 #!/usr/bin/env python3
 """
-Probe 16b (active / QDII / FOF funds): find each fund's REAL index from its name (passive: 跟踪标的; active: the main equity index of 业绩比较基准),
-by Eastmoney search → candidate index codes → price (CSI close + PE, else Eastmoney K-line) → R² against the fund's NAV.
-Only funds whose current mapping (data/funds_map.json) is not \"tracked\". Read-only; stops starting new funds after 8 min.
+Probe 17 (read-only): 万得全A / 全A PE median, CSI total-return indices, historical short-term rates.
 Paste into scripts/probe_sources.py, run "Probe data sources", paste the whole log back.
 """
 import json
-import math
-import os
 import re
 import time
 import urllib.parse
@@ -16,8 +12,7 @@ from datetime import datetime, timedelta, timezone
 
 BJ = timezone(timedelta(hours=8))
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
-T0 = time.monotonic()
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+END = datetime.now(BJ).strftime("%Y%m%d")
 
 
 def get(url, ref, timeout=30):
@@ -26,124 +21,83 @@ def get(url, ref, timeout=30):
         return r.read().decode("utf-8", "replace")
 
 
-def f10(code):
-    t = get(f"https://fundf10.eastmoney.com/jbgk_{code}.html", "https://fundf10.eastmoney.com/")
-    out = {}
-    for k in ("跟踪标的", "业绩比较基准"):
-        m = re.search(k + r"</th>\s*<td[^>]*>(.*?)</td>", t, re.S)
-        out[k] = re.sub(r"<[^>]+>", "", m.group(1)).strip() if m else ""
-    return out
+def safe(label, fn):
+    try:
+        fn()
+    except Exception as e:
+        print(f"  {label}: ❌ {type(e).__name__}: {str(e)[:140]}")
+    time.sleep(0.6)
 
 
-def bench_main(text):
-    """业绩比较基准 → the equity index with the largest weight (no bond / deposit / rate parts)."""
-    best = None
-    for part in re.split(r"[+＋]", text):
-        if any(w in part for w in ("债", "存款", "利率", "货币", "国债")) or "指数" not in part:
-            continue
-        m = re.search(r"([\d.]+)\s*%", part)
-        w = float(m.group(1)) if m else 100.0
-        name = re.split(r"指数", part)[0] + "指数"
-        name = re.sub(r"^[\s(（]*", "", name).replace("经汇率调整后的", "").strip()
-        if best is None or w > best[1]:
-            best = (name, w)
-    return best
-
-
-def clean(name):
-    n = re.sub(r"[（(][^）)]*[）)]", "", name)
-    for w in ("收益率", "人民币", "港元", "（", "）", "*", "×"):
-        n = n.replace(w, "")
-    return n.replace("指数", "").strip()
-
-
-def search(name):
-    j = json.loads(get("https://searchapi.eastmoney.com/api/suggest/get?input=" + urllib.parse.quote(name)
-                       + "&type=14&token=D43BF722C8E33BDC906FB84D85E326E8&count=20", "https://www.eastmoney.com/"))
-    return [(r.get("Code"), r.get("Name"), r.get("QuoteID")) for r in ((j.get("QuotationCodeTable") or {}).get("Data") or [])
-            if r.get("SecurityTypeName") == "指数"][:3]
-
-
-def series(code, qid):
-    """{date: close}, PE start date (CSI only), source."""
-    start = (datetime.now(BJ) - timedelta(days=420)).strftime("%Y%m%d")
-    if re.fullmatch(r"[0-9A-Z]{6}", str(code)):
-        try:
-            j = json.loads(get(f"https://www.csindex.com.cn/csindex-home/perf/index-perf?indexCode={code}&startDate=20100101"
-                               f"&endDate={datetime.now(BJ).strftime('%Y%m%d')}", "https://www.csindex.com.cn/", timeout=40))
-            d = j.get("data") or []
-            if d:
-                pe = next((x["tradeDate"] for x in d if x.get("peg") not in (None, "", 0)), None)
-                return {f"{x['tradeDate'][:4]}-{x['tradeDate'][4:6]}-{x['tradeDate'][6:]}": float(x["close"]) for x in d[-300:] if x.get("close")}, pe, "CSI"
-        except Exception:
-            pass
-    j = json.loads(get(f"https://push2his.eastmoney.com/api/qt/stock/kline/get?secid={qid}&ut=bd1d9ddb04089700cf9c27f6f7426281"
-                       f"&fields1=f1,f2,f3&fields2=f51,f53&klt=101&fqt=1&beg={start}&end=20500101&lmt=400", "https://quote.eastmoney.com/", timeout=40))
-    k = ((j.get("data") or {}).get("klines")) or []
-    return {x.split(",")[0]: float(x.split(",")[1]) for x in k}, None, "EM"
-
-
-def nav(code):
-    t = get(f"https://fund.eastmoney.com/pingzhongdata/{code}.js", "https://fund.eastmoney.com/", timeout=40)
-    m = re.search(r"Data_ACWorthTrend\s*=\s*(\[.*?\]);", t, re.S)
-    return {datetime.fromtimestamp(int(x[0]) / 1000, BJ).date().isoformat(): float(x[1]) for x in (json.loads(m.group(1)) if m else []) if x[1]}
-
-
-def r2(a, b):
-    common = sorted(set(a) & set(b))[-251:]
-    if len(common) < 120:
-        return None
-    x = [math.log(a[common[k]] / a[common[k - 1]]) for k in range(1, len(common))]
-    y = [math.log(b[common[k]] / b[common[k - 1]]) for k in range(1, len(common))]
-    mx, my = sum(x) / len(x), sum(y) / len(y)
-    sxy = sum((p - mx) * (q - my) for p, q in zip(x, y))
-    sxx, syy = sum((p - mx) ** 2 for p in x), sum((q - my) ** 2 for q in y)
-    return None if sxx <= 0 or syy <= 0 else round(100 * sxy * sxy / (sxx * syy), 1)
+def csi(code):
+    j = json.loads(get(f"https://www.csindex.com.cn/csindex-home/perf/index-perf?indexCode={code}&startDate=20000101&endDate={END}", "https://www.csindex.com.cn/", 40))
+    return j.get("data") or []
 
 
 def main():
-    print(f"Probe 16b at {datetime.now(BJ).strftime('%Y-%m-%d %H:%M')} Beijing\n")
-    fmap = json.load(open(os.path.join(ROOT, "data", "funds_map.json"), encoding="utf-8"))["funds"]
-    todo = [c for c, f in fmap.items() if f.get("method") != "tracked" and f.get("kind") in ("active", "fof", "qdii", "other")]   # part b: active / QDII / FOF funds
-    print(f"{len(todo)} funds to check\n")
-    summary = []
-    for code in todo:
-        if time.monotonic() - T0 > 480:
-            print("time budget used up")
-            break
-        f = fmap[code]
-        try:
-            info = f10(code)
-            if f["kind"] in ("passive", "enhanced", "etf"):
-                target, src = info["跟踪标的"], "跟踪标的"
+    print(f"Probe 17 at {datetime.now(BJ).strftime('%Y-%m-%d %H:%M')} Beijing\n")
+    print("=" * 100 + "\nA) 万得全A (881001): search, prices, quote PE; 全A PE median candidates")
+    qids = []
+    for q in ("万得全A", "881001", "万得全A指数"):
+        def run(q=q):
+            j = json.loads(get("https://searchapi.eastmoney.com/api/suggest/get?input=" + urllib.parse.quote(q)
+                               + "&type=14&token=D43BF722C8E33BDC906FB84D85E326E8&count=10", "https://www.eastmoney.com/"))
+            rows = [(r.get("Code"), r.get("Name"), r.get("QuoteID"), r.get("SecurityTypeName")) for r in ((j.get("QuotationCodeTable") or {}).get("Data") or [])]
+            print(f"  search {q}: {rows[:6]}")
+            qids.extend(r[2] for r in rows if r[3] == "指数" and r[2])
+        safe(q, run)
+    for qid in list(dict.fromkeys(qids + ["2.881001", "1.881001", "0.881001", "90.881001"]))[:6]:
+        def run(qid=qid):
+            j = json.loads(get(f"https://push2his.eastmoney.com/api/qt/stock/kline/get?secid={qid}&ut=bd1d9ddb04089700cf9c27f6f7426281"
+                               "&fields1=f1,f2,f3&fields2=f51,f53&klt=101&fqt=1&beg=19900101&end=20500101&lmt=10000", "https://quote.eastmoney.com/", 40))
+            k = ((j.get("data") or {}).get("klines")) or []
+            q = json.loads(get(f"https://push2.eastmoney.com/api/qt/stock/get?secid={qid}&ut=bd1d9ddb04089700cf9c27f6f7426281&fields=f43,f57,f58,f9,f23,f115,f162,f167",
+                               "https://quote.eastmoney.com/"))
+            print(f"  {qid}: {len(k)} bars {k[0] if k else '-'} … {k[-1] if k else '-'}; quote {q.get('data')}")
+        safe(qid, run)
+    for url, ref in (("https://legulegu.com/stockdata/a-ttm-lyr", "https://legulegu.com/"),
+                     ("https://legulegu.com/api/stock-data/market-ttm-lyr?marketId=5", "https://legulegu.com/stockdata/a-ttm-lyr"),
+                     ("https://www.csindex.com.cn/csindex-home/perf/index-perf?indexCode=000985&startDate=20260101&endDate=" + END, "https://www.csindex.com.cn/")):
+        def run(url=url, ref=ref):
+            t = get(url, ref, 40)
+            print(f"  {url[:70]}: {len(t)} bytes; starts {t[:200]!r}")
+        safe(url[:40], run)
+
+    print("=" * 100 + "\nB) CSI total-return indices (vs the price index: the ratio should grow by the dividend yield)")
+    for tr, px in (("H00300", "000300"), ("H00905", "000905"), ("H00852", "000852"), ("H00985", "000985"), ("H00016", "000016"),
+                   ("H00922", "000922"), ("H00906", "000906"), ("H00932", "000932")):
+        def run(tr=tr, px=px):
+            a, b = csi(tr), csi(px)
+            if not a:
+                print(f"  {tr}: no rows")
+                return
+            pm = {x["tradeDate"]: float(x["close"]) for x in b if x.get("close")}
+            both = [(x["tradeDate"], float(x["close"]) / pm[x["tradeDate"]]) for x in a if x.get("close") and x["tradeDate"] in pm]
+            yrs = (len(both) / 243) if both else 0
+            grow = (both[-1][1] / both[0][1]) ** (1 / yrs) - 1 if yrs > 1 else None
+            print(f"  {tr} ({a[-1].get('indexNameCn')}): {len(a)} rows {a[0]['tradeDate']}…{a[-1]['tradeDate']}; vs {px}: total / price "
+                  f"{both[0][1]:.3f} → {both[-1][1]:.3f}" + (f", +{grow * 100:.2f}%/yr (≈ dividend yield)" if grow is not None else ""))
+        safe(tr, run)
+
+    print("=" * 100 + "\nC) historical short-term rates")
+    def yeb():
+        t = get(f"https://fund.eastmoney.com/pingzhongdata/000198.js?v={int(time.time())}", "https://fund.eastmoney.com/", 40)
+        for var in ("Data_sevenDaysYearIncome", "Data_millionCopiesIncome"):
+            m = re.search(var + r"\s*=\s*(\[.*?\]);", t, re.S)
+            arr = json.loads(m.group(1)) if m else []
+            if arr:
+                f = lambda x: (datetime.fromtimestamp(x[0] / 1000, BJ).date().isoformat(), x[1])
+                print(f"  余额宝 000198 {var}: {len(arr)} points {f(arr[0])} … {f(arr[-1])}")
             else:
-                b = bench_main(info["业绩比较基准"])
-                target, src = (b[0] if b else ""), f"基准 {b[1]:g}%" if b else "基准"
-            if not target or "无跟踪标的" in target:
-                print(f"{code} {f['name'][:14]} [{f['kind']}]: no target ({info['业绩比较基准'][:60]})")
-                continue
-            q = clean(target)
-            cands = search(q) or search(q[:6])
-            fn = nav(code)
-            res = []
-            for c, n, qid in cands:
-                try:
-                    s, pe, srcname = series(c, qid)
-                    res.append((c, n, qid, srcname, pe, r2(fn, s)))
-                except Exception as e:
-                    res.append((c, n, qid, "×", None, None))
-                time.sleep(0.3)
-            best = max(res, key=lambda x: x[5] or -1) if res else None
-            print(f"{code} {f['name'][:14]} [{f['kind']}] {src}: \"{target[:30]}\" → search \"{q}\": "
-                  + "; ".join(f"{c} {n} {s}{' PE ' + pe if pe else ''} R² {r}" for c, n, qid, s, pe, r in res)
-                  + f"  | now {f.get('index')} ({f.get('method')}, R² {f.get('r2')})")
-            summary.append((code, best))
-        except Exception as e:
-            print(f"{code}: ❌ {type(e).__name__}: {str(e)[:100]}")
-        time.sleep(0.5)
-    ok = sum(1 for _, b in summary if b and b[5] and b[5] >= 80)
-    print(f"\n{len(summary)} checked; best candidate R² ≥ 80 %: {ok}; took {time.monotonic() - T0:.0f}s")
-    print("Probe 16b done. Please paste this whole log into the chat.")
+                print(f"  余额宝 000198 {var}: not found")
+    safe("余额宝", yeb)
+    for url in ("https://www.chinamoney.com.cn/ags/ms/cm-u-bk-shibor/ShiborHis?lang=cn&startDate=2025-11-01&endDate=2025-11-20",
+                "https://www.shibor.org/ags/ms/cm-u-bk-shibor/ShiborHis?lang=cn&startDate=2025-11-01&endDate=2025-11-20"):
+        def run(url=url):
+            t = get(url, "https://www.chinamoney.com.cn/", 30)
+            print(f"  {url[8:60]}: {len(t)} bytes; starts {t[:220]!r}")
+        safe(url[8:40], run)
+    print("=" * 100 + "\nProbe 17 done. Please paste this whole log into the chat.")
 
 
 if __name__ == "__main__":
